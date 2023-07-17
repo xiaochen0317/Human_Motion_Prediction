@@ -62,30 +62,26 @@ class GATLayer(nn.Module):
 
         if pos_enc == 'spatial':
             self.pos_enc = Spatial_Positional_Encoding(in_features)
-            self.adj = spatial_fixed_adj(joints, frames).to('cuda:0')
+            # self.adj = spatial_fixed_adj(joints, frames).to('cuda:0')
         else:
             self.pos_enc = Temporal_Positional_Encoding(in_features)
-            self.adj = temporal_fixed_adj(joints, frames).to('cuda:0')
+            # self.adj = temporal_fixed_adj(joints, frames).to('cuda:0')
             
     def forward(self, src, adj=None):  # input: [B, N, in_features]
         h = torch.matmul(self.pos_enc(src), self.W) # shape [B, N, out_features]
         B, N = h.size(0), h.size(1)
-        a_input = torch.cat([h.repeat(1, 1, N).view(B, N * N, -1), h.repeat(1, N, 1)], dim=1).view(B, N, -1, 2 * self.out_features) # shape[N, N, 2*out_features]
+        a_input = torch.cat([h.repeat(1, 1, N).view(B, N * N, -1), h.repeat(1, N, 1)], dim=1)\
+            .view(B, N, -1, 2 * self.out_features) # shape[N, N, 2*out_features]
         e = self.leakyrelu(torch.matmul(a_input, self.a).squeeze())  # [N,N,1] -> [N,N]
-        # e = torch.matmul(a_input, self.a).squeeze()  # [N,N,1] -> [N,N]
         zero_vec = -9e15*torch.ones_like(e)
         if adj is None:
             adj = torch.ones_like(e)  # full-connected
         attention = torch.where(adj > 0, e, zero_vec)
-        attention = attention + self.alpha * self.adj.unsqueeze(0)
+        #todo: 加权
+        # attention = attention + self.alpha * self.adj.unsqueeze(0)
         attention = F.softmax(attention, dim=1)
         attention = F.dropout(attention, self.dropout)
-        # h_prime = torch.matmul(attention, h)  # [B, N, N], [B, N, out_features] --> [B, N, out_features]
         return attention
-        # if self.concat:
-        #     return F.elu(h_prime), attention
-        # else:
-        #     return h_prime, attention
 
 
 class DMS_STGAT(nn.Module):
@@ -106,12 +102,12 @@ class DMS_STGAT(nn.Module):
 
         for i in range(len(spatial_scales)):
             self.spatial_gat.append(GATLayer(in_features, hidden_features, pos_enc='spatial', joints=spatial_scales[i],
-                                           frames=frames, alpha=alpha))
+                                             frames=frames, alpha=alpha))
             if i < len(spatial_scales) - 1:
                 self.spatial_left.append(nn.Parameter(torch.FloatTensor(spatial_scales[i], spatial_scales[i + 1])))
                 stdv = 1. / math.sqrt(self.spatial_left[i].size(1))
                 self.spatial_left[i].data.uniform_(-stdv, stdv)
-                self.spatial_right[i].append(nn.Parameter(torch.FloatTensor(spatial_scales[i + 1], spatial_scales[i])))
+                self.spatial_right.append(nn.Parameter(torch.FloatTensor(spatial_scales[i + 1], spatial_scales[i])))
                 stdv = 1. / math.sqrt(self.spatial_right[i].size(1))
                 self.spatial_right[i].data.uniform_(-stdv, stdv)
         for i in range(len(temporal_scales)):
@@ -133,8 +129,8 @@ class DMS_STGAT(nn.Module):
         spatial_input = src.permute(0, 2, 3, 1).reshape(B * T, J, C)
         spatial_attention = []
         for i in range(len(self.spatial_scales)):
-            spatial_attention[i] = self.spatial_gat[i](spatial_input).view(B, T, self.spatial_scales[i],
-                                                                           self.spatial_scales[i])
+            spatial_attention.append(self.spatial_gat[i](spatial_input).view(B, T, self.spatial_scales[i],
+                                                                             self.spatial_scales[i]))
             spatial_input = partition_and_pooling(spatial_input, spatial_attention[i], self.spatial_scales[i + 1],
                                                   mode='spatial')
         spatial_attention_fusion = spatial_attention[0]
@@ -148,8 +144,8 @@ class DMS_STGAT(nn.Module):
         temporal_input = src.permute(0, 3, 2, 1).reshape(B * J, T, C)
         temporal_attention = []
         for i in range(len(self.temporal_scales)):
-            temporal_attention[i] = self.temporal_gat[i](temporal_input).view(B, T, self.temporal_scales[i],
-                                                                           self.temporal_scales[i])
+            temporal_attention.append(self.temporal_gat[i](temporal_input).view(B, T, self.temporal_scales[i],
+                                                                                self.temporal_scales[i]))
             temporal_input = partition_and_pooling(temporal_input, temporal_attention[i], self.temporal_scalesp[i + 1],
                                                    mode='temporal')
         temporal_attention_fusion = temporal_attention[0]
@@ -161,23 +157,7 @@ class DMS_STGAT(nn.Module):
         return spatial_attention_fusion, temporal_attention_fusion
 
 
-# class GAT(nn.Module):
-#     def __init__(self, d_in, d_hid, nclass, dropout, alpha, nheads):
-#         super(GAT, self).__init__()
-#         self.dropout = dropout
-#         self.attentions = [GATLayer(d_in, d_hid, dropout=dropout, alpha=alpha, concat=True) for _ in range(nheads)]
-#         for i, attention in enumerate(self.attentions):
-#             self.add_module('attention_{}'.format(i), attention)
-#         self.out_att = GATLayer(d_hid * nheads, nclass, dropout=dropout, alpha=alpha, concat=False)
-#
-#     def forward(self, x, adj):
-#         x = F.dropout(x, self.dropout)
-#         x = torch.cat([att(x, adj) for att in self.attentions], dim=1)
-#         x = F.dropout(x, self.dropout)
-#         x = F.elu(self.out_att(x, adj))
-#         return F.log_softmax(x, dim=1)
-#
-#
+# todo: multi-head
 # class MultiHeadGATLayer(nn.Module):
 #     def __init__(self, in_features, out_features, num_heads, dropout=0.1, alpha=0.2, concat=True):
 #         super(MultiHeadGATLayer, self).__init__()
@@ -243,41 +223,6 @@ class DMS_STGAT(nn.Module):
 #             x = F.dropout(x, self.dropout)
 #         output = self.fc(x)
 #         return output
-#
-#
-class STGATModel(nn.Module):
-    def __init__(self, in_features, hidden_features, out_features, joints, frames, alpha):
-        super(STGATModel, self).__init__()
-        self.temporal_gat = GATLayer(in_features, hidden_features, pos_enc='temporal', joints=joints, frames=frames, alpha=alpha)
-        self.spatial_gat = GATLayer(in_features, hidden_features, pos_enc='spatial', joints=joints, frames=frames, alpha=alpha)
-        self.gcn = nn.Linear(hidden_features * 2, out_features)
-        self.alpha = alpha
-
-    def forward(self, x, temporal_adj=None, spatial_adj=None):
-        # Temporal GAT
-        B, C, T, J = x.size(0), x.size(1), x.size(2), x.size(3)
-        temporal_input = x.permute(0, 3, 2, 1)
-        temporal_input = temporal_input.reshape(B * J, T, C)
-        # temporal_output, temporal_attention = self.temporal_gat(temporal_input, temporal_adj)
-        temporal_attention = self.temporal_gat(temporal_input, temporal_adj)
-        # [B * J, T, C] [B * J, T, T]
-        # temporal_output = temporal_output.view(B, J, T, -1)
-        temporal_attention = temporal_attention.view(B, J, T, T)
-
-        # Spatial GAT
-        spatial_input = x.permute(0, 2, 3, 1).reshape(B * T, J, C)
-        # spatial_output, spatial_attention = self.spatial_gat(spatial_input, spatial_adj)
-        # spatial_output = spatial_output.view(B, T, J, -1).permute(0, 2, 1, 3)
-        spatial_attention = self.spatial_gat(spatial_input, spatial_adj)
-        spatial_attention = spatial_attention.view(B, T, J, J)
-
-        # Concatenate temporal and spatial outputs
-        # aggregated_output = torch.cat([temporal_output, spatial_output], dim=3)  # [B, J, T, 2*hidden_features]
-
-        # GCN
-        # output = self.gcn(aggregated_output)  # [B, J, T, out_features]
-        # return output, temporal_attention, spatial_attention
-        return temporal_attention, spatial_attention
 
 
 class ConvTemporalGraphical(nn.Module):
@@ -339,7 +284,7 @@ class ConvTemporalGraphical(nn.Module):
         # x = torch.einsum('nctv,tvw->nctw', (x, self.A))
         # x = torch.einsum('nctv,wvtq->ncqw', (x, self.Z))
         # _, T, A = self.STGAT(x)
-        T, A = self.D<(x)
+        T, A = self.STGAT(x)
         # temp = x
         x = torch.einsum('nctv,ntvw->nctw', (x, A))  # B 3 T J | B T J J  B 3 T J
         x = torch.einsum('nctv,nvtq->ncqv', (x, T))  # B 3 T J | B J T T  B 3 T J
@@ -388,7 +333,7 @@ class ST_GCNN_layer(nn.Module):
         padding = ((self.kernel_size[0] - 1) // 2, (self.kernel_size[1] - 1) // 2)
 
         self.gcn = ConvTemporalGraphical(d_in, d_hid, d_out, joints_dim, time_dim, alpha, spatial_scales,
-                                         temporal_scales)  # the convolution layer
+                                         temporal_scales)
 
         self.tcn = nn.Sequential(
             nn.Conv2d(
@@ -403,7 +348,6 @@ class ST_GCNN_layer(nn.Module):
         )
 
         if stride != 1 or in_channels != out_channels:
-
             self.residual = nn.Sequential(nn.Conv2d(
                 in_channels,
                 out_channels,
@@ -414,6 +358,8 @@ class ST_GCNN_layer(nn.Module):
 
         else:
             self.residual = nn.Identity()
+
+        self.layer_norm = nn.LayerNorm(d_in, eps=1e-6)
 
         self.prelu = nn.PReLU()
 
@@ -428,8 +374,6 @@ class ST_GCNN_layer(nn.Module):
 
 
 class CNN_layer(nn.Module):
-    # This is the simple CNN layer,that performs a 2-D convolution while maintaining the dimensions of the input
-    # (except for the features dimension)
 
     def __init__(self,
                  in_channels,
@@ -443,8 +387,8 @@ class CNN_layer(nn.Module):
             (kernel_size[0] - 1) // 2, (kernel_size[1] - 1) // 2)  # padding so that both dimensions are maintained
         assert kernel_size[0] % 2 == 1 and kernel_size[1] % 2 == 1
 
-        self.block = [nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
-            , nn.BatchNorm2d(out_channels), nn.Dropout(dropout, inplace=True)]
+        self.block = [nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding),
+                      nn.BatchNorm2d(out_channels), nn.Dropout(dropout, inplace=True)]
 
         self.block = nn.Sequential(*self.block)
 
