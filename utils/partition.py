@@ -21,26 +21,10 @@ class GCNLayer(nn.Module):
 
     def reset_parameters(self):
         self.lin.reset_parameters()
-        self.bias.data.fill_(0.0)
+        if self.bias is not None:
+            self.bias.data.fill_(0.0)
 
     def forward(self, x, adj, mask= None):
-        """"
-        Args:
-            x (torch.Tensor): Node feature tensor
-                :math:`\mathbf{X} \in \mathbb{R}^{B \times N \times F}`, with
-                batch-size :math:`B`, (maximum) number of nodes :math:`N` for
-                each graph, and feature dimension :math:`F`.
-            adj (torch.Tensor): Adjacency tensor
-                :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`.
-                The adjacency tensor is broadcastable in the batch dimension,
-                resulting in a shared adjacency matrix for the complete batch.
-            mask (torch.Tensor, optional): Mask matrix
-                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-                the valid nodes for each graph. (default: :obj:`None`)
-            self_connected (bool, optional): If set to :obj:`False`, the layer will
-                not automatically add self-loops to the adjacency matrices.
-                (default: :obj:`True`)
-        """
         x = x.unsqueeze(0) if x.dim() == 2 else x
         adj = adj.unsqueeze(0) if adj.dim() == 2 else adj
         B, N, C = adj.size()
@@ -102,12 +86,26 @@ class DiffPoolingLayer(nn.Module):
         self.GNN_Pool = PoolingGNN(in_features, hidden_features, num_clusters)
         # todo:embedding?
         self.GNN_Embed = PoolingGNN(in_features, hidden_features, hidden_features, linear=False)
-        self.softmax = nn.Softmax(dim=1)
+        self.softmax = nn.Softmax(dim=2)
 
-    def forward(self, src, adj, mask=None):
-        s = self.GNN_Pool(src, adj, mask)
-        output, adj, l1, e1 = dense_diff_pool(src, adj, s, mask)
-        return output, l1, e1
+    def forward(self, src, adj, mask=None, device='cuda:0'):
+        # adj = torch.mean(adj, dim=1)
+        B, H, N, _ = adj.size()
+        C = src.size()[2]
+        output = torch.zeros([B, H, self.num_clusters, C]).to(device)
+        s = torch.zeros([B, H, N, self.num_clusters]).to(device)
+        l = 0
+        e = 0
+        for i in range(H):
+            s[:, i, :, :] = self.GNN_Pool(src, adj[:, i, :, :], mask)
+            # todo: src embed->return?
+            # src = self.GNN_Embed(src, adj, mask)
+            s = self.softmax(s)
+            output[:, i, :, :], _, l1, e1 = dense_diff_pool(src, adj[:, i, :, :], s[:, i, :, :], mask)
+            l += l1
+            e += e1
+        output = torch.mean(output, dim=1)
+        return output, s, l, e  # [B, N, C] [B, N, C, Cluster]
 
 
 if __name__ == '__main__':

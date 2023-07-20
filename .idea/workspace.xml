@@ -5,10 +5,10 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="c4c03faa-dc48-4560-ae51-9018eeffc095" name="变更" comment="变更">
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main_h36_3d.py" beforeDir="false" afterPath="$PROJECT_DIR$/main_h36_3d.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/model_copy.py" beforeDir="false" afterPath="$PROJECT_DIR$/model_copy.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/h36motion3d.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/h36motion3d.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/utils/parser.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/parser.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/utils/partition.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/partition.py" afterDir="false" />
     </list>
@@ -45,7 +45,7 @@
     &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
   }
 }</component>
-  <component name="RunManager" selected="Python.partition">
+  <component name="RunManager" selected="Python.main_h36_3d">
     <configuration name="bone_length" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="DMS-STGAT" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -109,6 +109,27 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
+    <configuration name="model_copy" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="DMS-STGAT" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/model_copy.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
     <configuration name="partition" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="DMS-STGAT" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -153,6 +174,7 @@
     </configuration>
     <list>
       <item itemvalue="Python.main_h36_3d" />
+      <item itemvalue="Python.model_copy" />
       <item itemvalue="Python.bone_length" />
       <item itemvalue="Python.h36_3d_viz" />
       <item itemvalue="Python.partition" />
@@ -160,6 +182,7 @@
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.model_copy" />
         <item itemvalue="Python.partition" />
         <item itemvalue="Python.test" />
         <item itemvalue="Python.bone_length" />
@@ -197,7 +220,14 @@
       <option name="project" value="LOCAL" />
       <updated>1689602277539</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="变更">
+      <created>1689843977444</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1689843977444</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -228,6 +258,11 @@
           <url>file://$PROJECT_DIR$/utils/h36_3d_viz_copy.py</url>
           <line>113</line>
           <option name="timeStamp" value="9" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/model_copy.py</url>
+          <line>165</line>
+          <option name="timeStamp" value="27" />
         </line-breakpoint>
       </breakpoints>
       <default-breakpoints>

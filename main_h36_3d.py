@@ -44,8 +44,8 @@ def lr_decay(optimizer, lr_now, gamma):
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('Using device: %s' % device)
 
-model = Model(args.input_dim, args.input_n, args.output_n, args.st_gcnn_dropout,args.n_tcnn_layers,
-              args.tcnn_kernel_size, args.tcnn_dropout, args.d_hid, args.joints_to_consider, args.alpha,
+model = Model(args.input_dim, args.hidden_features, args.input_n, args.output_n, args.st_gcnn_dropout,
+              args.n_tcnn_layers, args.tcnn_kernel_size, args.tcnn_dropout, args.heads, args.alpha,
               args.spatial_scales, args.temporal_scales).to(device)
 
 print('total number of parameters of the network is: ' + str(
