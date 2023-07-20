@@ -1,78 +1,114 @@
 import torch
 import torch.nn as nn
-import numpy as np
-from sklearn.cluster import SpectralClustering
+from torch_geometric.nn.dense import dense_diff_pool
 
 
-def spectral_clustering(A, num_clusters):
-    """
-    :param A: 邻接矩阵
-    :param num_clusters: 类的数量
-    :return: 节点的社区标签，类型为numpy数组
-    """
-    # A = A.detach().numpy()
-    A = (A + A.transpose(1, 2)) / 2  # 使邻接矩阵对称
-    D = torch.sum(A, dim=1)
-    D_sqrt = torch.sqrt(torch.clamp(D, min=1e-9))
-    D_inv_sqrt = 1.0 / D_sqrt
-    D_inv_sqrt[torch.isinf(D_inv_sqrt)] = 0.0
-    L = torch.diag(D_inv_sqrt) @ A @ torch.diag(D_inv_sqrt)
+class GCNLayer(nn.Module):
+    def __init__(self, in_channels, out_channels, bias = True):
+        super().__init__()
 
-    eigenvalues, eigenvectors = torch.eig(L, eigenvectors=True)
+        self.in_channels = in_channels
+        self.out_channels = out_channels
 
-    _, indices = torch.sort(eigenvalues[:, 0])
-    eigenvectors = eigenvectors[: ,indices]
+        self.lin = nn.Linear(in_channels, out_channels, bias=False)
 
-    k_eigenvectors = eigenvectors[:, :num_clusters]
-    k_eigenvectors_norm = nn.functional.normalize(k_eigenvectors, dim=-1)
-    kmeans = torch.cluster.kMeans(num_clusters)
-    labels = kmeans.fit(k_eigenvectors_norm)
+        if bias:
+            self.bias = nn.Parameter(torch.Tensor(out_channels))
+        else:
+            self.register_parameter('bias', None)
 
-    return labels
+        self.reset_parameters()
 
-def partition_and_pooling(src, adj, num_clusters, mode):
-    """
-    :param src: 输入数据 [B*J, T, C] / [B*C, J, C]
-    :param adj: 时空邻接矩阵 [B*T, J, J] / [B*J, T, T]
-    :param num_clusters: 类数量
-    :param mode: 模式（时/空）
-    :return: 经过处理的输出数据
-    """
-    if mode == 'spatial':  # adj: B*T, J, J
-        B, J, C = src.size()
-        labels = np.zeros((B, J))
-        output = torch.zeros((B, num_clusters, C))
-        for i in range(B):
-            labels[i, :] = spectral_clustering(adj[i, :, :], num_clusters)
-            # average information of joints in the same cluster
-            unique_labels = np.unique(labels[i, :])
-            # 遍历每个社区标签
-            for label in unique_labels:
-                indices = np.where(labels == label)[0]
-                output[i, label, :] = torch.mean(src[i, indices, :], dim=-1)
-    else:
-        B, T, C = src.size()
-        labels = np.zeros((B, T))
-        output = torch.zeros((B, num_clusters, C))
-        for i in range(B):
-            labels[i, :] = spectral_clustering(adj[i, :, :], num_clusters)
-            # average information of joints in the same cluster
-            unique_labels = np.unique(labels[i, :])
-            # 遍历每个社区标签
-            for label in unique_labels:
-                # 找到所有标签为label的节点
-                indices = np.where(labels == label)[0]
-                # 计算这些节点的平均信息
-                output[i, label, :] = torch.mean(src[i, indices, :], dim=-1)
-    return output  # B*T, C, N / B*J, C, N
+    def reset_parameters(self):
+        self.lin.reset_parameters()
+        self.bias.data.fill_(0.0)
+
+    def forward(self, x, adj, mask= None):
+        """"
+        Args:
+            x (torch.Tensor): Node feature tensor
+                :math:`\mathbf{X} \in \mathbb{R}^{B \times N \times F}`, with
+                batch-size :math:`B`, (maximum) number of nodes :math:`N` for
+                each graph, and feature dimension :math:`F`.
+            adj (torch.Tensor): Adjacency tensor
+                :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`.
+                The adjacency tensor is broadcastable in the batch dimension,
+                resulting in a shared adjacency matrix for the complete batch.
+            mask (torch.Tensor, optional): Mask matrix
+                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
+                the valid nodes for each graph. (default: :obj:`None`)
+            self_connected (bool, optional): If set to :obj:`False`, the layer will
+                not automatically add self-loops to the adjacency matrices.
+                (default: :obj:`True`)
+        """
+        x = x.unsqueeze(0) if x.dim() == 2 else x
+        adj = adj.unsqueeze(0) if adj.dim() == 2 else adj
+        B, N, C = adj.size()
+
+        out = self.lin(x)
+        out = torch.matmul(adj, out)
+
+        if self.bias is not None:
+            out = out + self.bias
+
+        if mask is not None:
+            out = out * mask.view(B, N, 1).to(x.dtype)
+
+        return out
+
+
+class PoolingGNN(nn.Module):
+    def __init__(self, in_features, hidden_features, out_features, normalize=False, linear=True) :
+        super(PoolingGNN, self).__init__()
+        self.conv1 = GCNLayer(in_features, hidden_features, normalize)
+        self.bn1 = nn.BatchNorm1d(hidden_features)
+        self.conv2 = GCNLayer(hidden_features, hidden_features, normalize)
+        self.bn2 = nn.BatchNorm1d(hidden_features)
+        self.conv3 = GCNLayer(hidden_features, out_features, normalize)
+        self.bn3 = nn.BatchNorm1d(out_features)
+
+        if linear is True:
+            self.linear = nn.Linear(2 * hidden_features + out_features, out_features)
+        else:
+            self.linear = None
+
+    def bn(self, i, x):
+        batch_size, num_nodes, num_features = x.size()
+        x = x.view(-1, num_features)
+        x = getattr(self, f'bn{i}')(x)
+        x = x.view(batch_size, num_nodes, num_features)
+        return x
+
+    def forward(self, x, adj, mask=None):
+        batch_size, num_nodes, in_channels = x.size()
+
+        x0 = x
+        x1 = self.bn(1, self.conv1(x0, adj, mask).relu())
+        x2 = self.bn(2, self.conv2(x1, adj, mask).relu())
+        x3 = self.bn(3, self.conv3(x2, adj, mask).relu())
+
+        x = torch.cat([x1, x2, x3], dim=-1)
+
+        if self.linear is not None:
+            x = self.linear(x).relu()
+        return x
+
+
+class DiffPoolingLayer(nn.Module):
+    def __init__(self, in_features, hidden_features, num_clusters):
+        super(DiffPoolingLayer, self).__init__()
+        self.in_features = in_features
+        self.num_clusters = num_clusters
+        self.GNN_Pool = PoolingGNN(in_features, hidden_features, num_clusters)
+        # todo:embedding?
+        self.GNN_Embed = PoolingGNN(in_features, hidden_features, hidden_features, linear=False)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, src, adj, mask=None):
+        s = self.GNN_Pool(src, adj, mask)
+        output, adj, l1, e1 = dense_diff_pool(src, adj, s, mask)
+        return output, l1, e1
 
 
 if __name__ == '__main__':
-    # 随机生成一个5x5的邻接矩阵
-    Ab = torch.rand((5, 5))
-    print('邻接矩阵：\n', Ab)
-
-    # 进行图分割，得到每个节点的社区标签
-    num_clustersb = 2
-    labelb = spectral_clustering(Ab, num_clustersb)
-    print('社区标签：', labelb)
+    pass

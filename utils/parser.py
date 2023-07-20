@@ -60,7 +60,7 @@ parser.add_argument('--d_hid', type=int, default=64)
 parser.add_argument('--loss_parameter', type=float, default=0.0)
 parser.add_argument('--lr_decay', type=float, default=0.98)
 parser.add_argument('--alpha', type=float, default=0.5)
-parser.add_argument('--spatial_scales', type=list, default=[22, 12, 7, 5])
+parser.add_argument('--spatial_scales', type=list, default=[22, 10, 7, 3])
 parser.add_argument('--temporal_scales', type=list, default=[10, 6, 3])
 
 args = parser.parse_args()

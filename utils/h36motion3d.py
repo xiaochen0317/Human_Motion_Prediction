@@ -36,6 +36,7 @@ class Datasets(Dataset):
         self.data_idx = []
         seq_len = self.in_n + self.out_n
         subs = [[1, 6, 7, 8, 9], [11], [5]]
+        subs = [[1], [11], [5]]
         # acts = data_utils.define_actions(actions)
         if actions is None:
             acts = ["walking", "eating", "smoking", "discussion", "directions",
