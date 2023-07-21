@@ -47,20 +47,20 @@ class Spatial_Positional_Encoding(nn.Module):
 
 
 class AttentionLayer(nn.Module):
-    def __init__(self, in_features, out_features, heads, alpha, dropout=0.1, negative_slope=0.2):
+    def __init__(self, in_features, hidden_features, heads, alpha, dropout=0.1, negative_slope=0.2):
         super(AttentionLayer, self).__init__()
         self.dropout = dropout
         self.in_features = in_features
-        self.out_features = out_features
+        self.hidden_features = hidden_features
         self.alpha = alpha
-        self.negative_slope = negative_slope
         self.heads = heads
+        self.negative_slope = negative_slope
 
-        self.lin = nn.Linear(in_features, out_features, bias=False)
-        self.att_src = nn.Parameter(torch.Tensor(1, 1, heads, out_features // heads))
-        nn.init.normal_(self.att_src, mean=0, std=math.sqrt(heads))
-        self.att_dst = nn.Parameter(torch.Tensor(1, 1, heads, out_features // heads))
-        nn.init.normal_(self.att_dst, mean=0, std=math.sqrt(heads))
+        self.lin = nn.Linear(in_features, hidden_features, bias=False)
+        self.att_src = nn.Parameter(torch.Tensor(1, 1, heads, hidden_features // heads))
+        nn.init.normal_(self.att_src, mean=0, std=math.sqrt(hidden_features))
+        self.att_dst = nn.Parameter(torch.Tensor(1, 1, heads, hidden_features // heads))
+        nn.init.normal_(self.att_dst, mean=0, std=math.sqrt(hidden_features))
 
         # if bias and concat:
         #     self.bias = nn.Parameter(torch.Tensor(heads * out_channels))
@@ -79,7 +79,7 @@ class AttentionLayer(nn.Module):
         #     # self.adj = temporal_fixed_adj(joints, frames).to('cuda:0')
             
     def forward(self, src, mask=None):  # input: [B, N, in_features]
-        H, C = self.heads, self.out_features // self.heads
+        H, C = self.heads, self.hidden_features // self.heads
         B, N, _ = src.size()
 
         x = self.lin(src).view(B, N, H, C)  # [B, N, H, C]
@@ -126,7 +126,7 @@ class DMS_STAttention(nn.Module):
         self.temporal_right = []
 
         for i in range(len(spatial_scales)):
-            self.spatial_gat.append(AttentionLayer(in_features, out_features, heads, alpha))
+            self.spatial_gat.append(AttentionLayer(in_features, hidden_features, heads, alpha))
             if i < len(spatial_scales) - 1:
                 self.spatial_pool.append(
                     DiffPoolingLayer(self.in_features, self.hidden_features, self.spatial_scales[i + 1]))
@@ -137,7 +137,7 @@ class DMS_STAttention(nn.Module):
                 stdv = 1. / math.sqrt(self.spatial_right[i].size(1))
                 self.spatial_right[i].data.uniform_(-stdv, stdv)
         for i in range(len(temporal_scales)):
-            self.temporal_gat.append(AttentionLayer(in_features, out_features, heads, alpha))
+            self.temporal_gat.append(AttentionLayer(in_features, hidden_features, heads, alpha))
             if i < len(temporal_scales) - 1:
                 self.temporal_pool.append(
                     DiffPoolingLayer(self.in_features, self.hidden_features, self.temporal_scales[i + 1]))
@@ -293,6 +293,29 @@ class TemporalConvNet(nn.Module):
         return self.network(x)
 
 
+class TCN_Layer(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size,
+                 dropout,
+                 bias=True):
+        super(TCN_Layer, self).__init__()
+        self.kernel_size = kernel_size
+        padding = (
+        (kernel_size[0] - 1) // 2, (kernel_size[1] - 1) // 2)  # padding so that both dimensions are maintained
+        assert kernel_size[0] % 2 == 1 and kernel_size[1] % 2 == 1
+
+        self.block = [nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
+            , nn.BatchNorm2d(out_channels), nn.Dropout(dropout, inplace=True)]
+
+        self.block = nn.Sequential(*self.block)
+
+    def forward(self, x):
+        output = self.block(x)
+        return output
+
+
 class Model(nn.Module):
     """ 
     Shape:
@@ -334,18 +357,13 @@ class Model(nn.Module):
                                               alpha, spatial_scales, temporal_scales))
         self.st_gcnns.append(DMS_ST_GAT_layer(64, hidden_features, 32, [1, 1], 1, heads, st_gcnn_dropout,
                                               alpha, spatial_scales, temporal_scales))
-        self.st_gcnns.append(DMS_ST_GAT_layer(32, hidden_features, 64, [1, 1], 1, heads, st_gcnn_dropout,
+        self.st_gcnns.append(DMS_ST_GAT_layer(32, hidden_features, in_features, [1, 1], 1, heads, st_gcnn_dropout,
                                               alpha, spatial_scales, temporal_scales))
-        self.st_gcnns.append(nn.Sequential(
-            nn.Conv2d(64, in_features, (1, 1), (1, 1), 0),
-            nn.BatchNorm2d(in_features),
-            nn.Dropout(st_gcnn_dropout, inplace=True)))
 
-        self.txcnns.append(TemporalConvNet(input_time_frame, output_time_frame, txc_kernel_size,
-                                           txc_dropout))
+        self.txcnns.append(TCN_Layer(input_time_frame, output_time_frame, txc_kernel_size, txc_dropout))
         # with kernel_size[3,3] the dimensinons of C,V will be maintained
         for i in range(1, n_txcnn_layers):
-            self.txcnns.append(TemporalConvNet(output_time_frame, output_time_frame, txc_kernel_size, txc_dropout))
+            self.txcnns.append(TCN_Layer(output_time_frame, output_time_frame, txc_kernel_size, txc_dropout))
 
         self.prelus = nn.ModuleList()
 
@@ -353,20 +371,15 @@ class Model(nn.Module):
             self.prelus.append(nn.PReLU())
 
     def forward(self, x):
-        i=0
         for gcn in self.st_gcnns:
             x = gcn(x)
-            print(i)
-            i+=1
 
-        x = x.permute(0, 1, 3, 2)  # prepare the input for the Time-Extrapolator-CNN (NCTV->NCVT)
+        x = x.permute(0, 2, 1, 3)  # prepare the input for the Time-Extrapolator-CNN (NCTV->NTCV)
 
         x = self.prelus[0](self.txcnns[0](x))
 
         for i in range(1, self.n_txcnn_layers):
             x = self.prelus[i](self.txcnns[i](x)) + x  # residual connection
-
-        x = x.permute(0, 3, 1, 2)
 
         return x
 

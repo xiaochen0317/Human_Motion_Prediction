@@ -22,7 +22,7 @@ parser.add_argument('--n_ccnn_layers', type=int, default=2,
 parser.add_argument('--n_tcnn_layers', type=int, default=4,
                     help='number of layers for the Time-Extrapolator Convolution')
 parser.add_argument('--ccnn_kernel_size', type=list, default=[1, 1], help=' kernel for the C-CNN layers')
-parser.add_argument('--tcnn_kernel_size', type=int, default=2,
+parser.add_argument('--tcnn_kernel_size', type=list, default=[3, 3],
                     help=' kernel for the Time-Extrapolator CNN layers')
 parser.add_argument('--embedding_dim', type=int, default=40, help='dimensions for the coordinates of the embedding')
 parser.add_argument('--input_dim', type=int, default=3, help='dimensions of the input coordinates')
@@ -56,12 +56,12 @@ parser.add_argument('--actions_to_consider', default='all',
                     help='Actions to visualize.Choose either all or a list of actions')
 parser.add_argument('--n_viz', type=int, default='2', help='Numbers of sequences to visaluze for each action')
 
-parser.add_argument('--hidden_features', type=int, default=64)
-parser.add_argument('--heads', type=int, default=8)
+parser.add_argument('--hidden_features', type=int, default=16)
+parser.add_argument('--heads', type=int, default=4)
 parser.add_argument('--loss_parameter', type=float, default=0.0)
 parser.add_argument('--lr_decay', type=float, default=0.98)
 parser.add_argument('--alpha', type=float, default=0.5)
-parser.add_argument('--spatial_scales', type=list, default=[22, 10, 7, 3])
+parser.add_argument('--spatial_scales', type=list, default=[22, 12, 5])
 parser.add_argument('--temporal_scales', type=list, default=[10, 6, 3])
 
 args = parser.parse_args()

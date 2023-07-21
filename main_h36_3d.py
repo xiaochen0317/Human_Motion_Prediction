@@ -56,6 +56,7 @@ model_name = 'h36_3d_' + str(args.output_n) + 'frames_ckpt'
 
 def train():
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-05)
+    torch.autograd.set_detect_anomaly(True)
 
     # if args.use_scheduler:
     #     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.gamma)

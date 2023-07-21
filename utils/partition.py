@@ -86,7 +86,7 @@ class DiffPoolingLayer(nn.Module):
         self.GNN_Pool = PoolingGNN(in_features, hidden_features, num_clusters)
         # todo:embedding?
         self.GNN_Embed = PoolingGNN(in_features, hidden_features, hidden_features, linear=False)
-        self.softmax = nn.Softmax(dim=2)
+        self.softmax = nn.Softmax(dim=1)
 
     def forward(self, src, adj, mask=None, device='cuda:0'):
         # adj = torch.mean(adj, dim=1)
@@ -100,12 +100,12 @@ class DiffPoolingLayer(nn.Module):
             s[:, i, :, :] = self.GNN_Pool(src, adj[:, i, :, :], mask)
             # todo: src embed->return?
             # src = self.GNN_Embed(src, adj, mask)
-            s = self.softmax(s)
+            s[:, i, :, :] = self.softmax(s[:, i, :, :])
             output[:, i, :, :], _, l1, e1 = dense_diff_pool(src, adj[:, i, :, :], s[:, i, :, :], mask)
             l += l1
             e += e1
         output = torch.mean(output, dim=1)
-        return output, s, l, e  # [B, N, C] [B, N, C, Cluster]
+        return output.contiguous(), s.contiguous(), l, e  # [B, N, C] [B, N, C, Cluster]
 
 
 if __name__ == '__main__':
