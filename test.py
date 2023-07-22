@@ -1,22 +1,16 @@
 import torch
-import numpy as np
-from sklearn.cluster import KMeans
+from torch import nn
+from torchviz import make_dot, make_dot_from_trace
+from utils.parser import args
+import os
+from model_copy import Model
 
-# Assume your data is stored in a PyTorch tensor 'data_tensor'
-data_tensor = torch.tensor([[x1, x2, x3, ...], [y1, y2, y3, ...], ...])
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print('Using device: %s' % device)
+model_name = 'h36_3d_' + str(args.output_n) + 'frames_ckpt'
+model = Model(args.input_dim, args.hidden_features, args.input_n, args.output_n, args.st_gcnn_dropout,
+              args.n_tcnn_layers, args.tcnn_kernel_size, args.tcnn_dropout, args.heads, args.alpha,
+              args.spatial_scales, args.temporal_scales).to(device)
 
-# Convert the PyTorch tensor to a NumPy array
-data_np = data_tensor.numpy()
-
-# Specify the number of clusters (K)
-K = 3
-
-# Create a KMeans object and fit it to your data
-kmeans = KMeans(n_clusters=K)
-kmeans.fit(data_np)
-
-# Get the cluster centers and labels
-cluster_centers = torch.tensor(kmeans.cluster_centers_)
-labels = torch.tensor(kmeans.labels_)
-
-# Now you have the cluster centers and the assigned labels
+model.load_state_dict(torch.load(os.path.join(args.model_path, model_name)))
+print(model)

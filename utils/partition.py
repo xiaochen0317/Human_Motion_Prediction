@@ -42,7 +42,7 @@ class GCNLayer(nn.Module):
 
 
 class PoolingGNN(nn.Module):
-    def __init__(self, in_features, hidden_features, out_features, normalize=False, linear=True) :
+    def __init__(self, in_features, hidden_features, out_features, normalize=False, linear=True):
         super(PoolingGNN, self).__init__()
         self.conv1 = GCNLayer(in_features, hidden_features, normalize)
         self.bn1 = nn.BatchNorm1d(hidden_features)
@@ -50,6 +50,8 @@ class PoolingGNN(nn.Module):
         self.bn2 = nn.BatchNorm1d(hidden_features)
         self.conv3 = GCNLayer(hidden_features, out_features, normalize)
         self.bn3 = nn.BatchNorm1d(out_features)
+        self.conv_1 = GCNLayer(in_features, out_features, normalize)
+        self.bn_1 = nn.BatchNorm1d(out_features)
 
         if linear is True:
             self.linear = nn.Linear(2 * hidden_features + out_features, out_features)
@@ -67,15 +69,15 @@ class PoolingGNN(nn.Module):
         batch_size, num_nodes, in_channels = x.size()
 
         x0 = x
-        x1 = self.bn(1, self.conv1(x0, adj, mask).relu())
-        x2 = self.bn(2, self.conv2(x1, adj, mask).relu())
-        x3 = self.bn(3, self.conv3(x2, adj, mask).relu())
+        # x1 = self.bn(1, self.conv1(x0, adj, mask).relu())
+        # x2 = self.bn(2, self.conv2(x1, adj, mask).relu())
+        x3 = self.bn(3, self.conv_1(x, adj, mask).relu())
 
-        x = torch.cat([x1, x2, x3], dim=-1)
+        # x = torch.cat([x1, x2, x3], dim=-1)
 
-        if self.linear is not None:
-            x = self.linear(x).relu()
-        return x
+        # if self.linear is not None:
+        #     x = self.linear(x).relu()
+        return x3
 
 
 class DiffPoolingLayer(nn.Module):
@@ -86,26 +88,19 @@ class DiffPoolingLayer(nn.Module):
         self.GNN_Pool = PoolingGNN(in_features, hidden_features, num_clusters)
         # todo:embedding?
         self.GNN_Embed = PoolingGNN(in_features, hidden_features, hidden_features, linear=False)
-        self.softmax = nn.Softmax(dim=1)
+        self.softmax = nn.Softmax(dim=2)
 
-    def forward(self, src, adj, mask=None, device='cuda:0'):
+    def forward(self, src, adj, mask=None):
         # adj = torch.mean(adj, dim=1)
-        B, H, N, _ = adj.size()
+        B, N, _ = adj.size()
         C = src.size()[2]
-        output = torch.zeros([B, H, self.num_clusters, C]).to(device)
-        s = torch.zeros([B, H, N, self.num_clusters]).to(device)
-        l = 0
-        e = 0
-        for i in range(H):
-            s[:, i, :, :] = self.GNN_Pool(src, adj[:, i, :, :], mask)
-            # todo: src embed->return?
-            # src = self.GNN_Embed(src, adj, mask)
-            s[:, i, :, :] = self.softmax(s[:, i, :, :])
-            output[:, i, :, :], _, l1, e1 = dense_diff_pool(src, adj[:, i, :, :], s[:, i, :, :], mask)
-            l += l1
-            e += e1
-        output = torch.mean(output, dim=1)
-        return output.contiguous(), s.contiguous(), l, e  # [B, N, C] [B, N, C, Cluster]
+        s = self.GNN_Pool(src, adj, mask)
+        s = self.softmax(s)
+        # todo: src embed->return?
+        # src = self.GNN_Embed(src, adj, mask)
+        output, _, l1, e1 = dense_diff_pool(src, adj, s, mask)
+        # print(s[0])
+        return output, s, l1, e1  # [B, N, C] [B, N, C, Cluster]
 
 
 if __name__ == '__main__':
