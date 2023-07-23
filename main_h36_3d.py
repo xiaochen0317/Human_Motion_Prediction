@@ -14,7 +14,7 @@ from utils.parser import args
 from bone_length import bone_length_loss
 
 
-def seed_torch(seed=317):
+def seed_torch(seed=1000):
     os.environ['PYTHONHASHSEED'] = str(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -60,10 +60,10 @@ model_name = 'h36_3d_' + str(args.output_n) + 'frames_ckpt'
 def train():
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-05)
     # optimizer_reverse = optim.Adam(model_reverse.parameters(), lr=args.lr, weight_decay=1e-05)
-    # torch.autograd.set_detect_anomaly(True)
+    torch.autograd.set_detect_anomaly(True)
 
-    # if args.use_scheduler:
-    #     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.gamma)
+    if args.use_scheduler:
+        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.gamma)
     #     scheduler_loss = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
     loss_threshold = 80
     best_acc = 1e9
@@ -87,8 +87,8 @@ def train():
 
     for epoch in range(args.n_epochs):
         running_loss = 0
-        if epoch % 5 == 0:
-            args.lr = lr_decay(optimizer, args.lr, args.lr_decay)
+        # if epoch % 5 == 0:
+        #     args.lr = lr_decay(optimizer, args.lr, args.lr_decay)
         n = 0
         model.train()
         print('lr: %.6f' % (optimizer.state_dict())['param_groups'][0]['lr'])
@@ -123,7 +123,7 @@ def train():
 
             if cnt % 200 == 0:
                 print('[%d, %5d]  training loss: %.3f' % (epoch + 1, cnt + 1, loss1.item()))
-                print('loss: %.3f, l: %.3f, e: %.3f' % (loss1, l, e))
+                # print('loss: %.3f, l: %.3f, e: %.3f' % (loss1, l, e))
                 # print(torch.gradient(l))
 
             # loss_reverse.backward(retain_graph=True)
@@ -165,7 +165,8 @@ def train():
                     print('[%d, %5d]  validation loss: %.3f' % (epoch + 1, cnt + 1, loss1.item()))
                 running_loss += loss1 * batch_dim
             val_loss.append(running_loss.detach().cpu() / n)
-        print('epoch %d  training loss: %.3f, validation loss: %.3f' % (epoch + 1, train_loss[-1], val_loss[-1]))
+        test_error=test()
+        print('epoch %d  training loss: %.3f, validation loss: %.3f, test: %.3f' % (epoch + 1, train_loss[-1], val_loss[-1], test_error))
         # if args.use_scheduler:
         #     scheduler.step()
         #     if val_loss[-1] < loss_threshold:
@@ -177,19 +178,27 @@ def train():
             plt.plot(val_loss, 'g', label='Val loss')
             plt.legend()
             plt.show()
+        if args.use_scheduler:
+            scheduler.step()
 
-        if val_loss[-1] < best_acc:
+        # if val_loss[-1] < best_acc:
+        #     print('----saving model-----')
+        #     torch.save(model.state_dict(), os.path.join(args.model_path, model_name))
+        #     best_acc = val_loss[-1]
+        #     print('best loss: %.3f' % best_acc)
+        if test_error < best_acc:
             print('----saving model-----')
             torch.save(model.state_dict(), os.path.join(args.model_path, model_name))
             best_acc = val_loss[-1]
+            print('best loss: %.3f' % test_error)
 
 
 def test():
-    print(args.model_path)
-    print(model_name)
-    model.load_state_dict(torch.load(os.path.join(args.model_path, model_name)))
+    # print(args.model_path)
+    # print(model_name)
+    # model.load_state_dict(torch.load(os.path.join(args.model_path, model_name)))
     model.eval()
-    print(model)
+    # print(model)
     accum_loss = 0
     n_batches = 0  # number of batches for all the sequences
     actions = define_actions(args.actions_to_consider)
@@ -240,6 +249,7 @@ def test():
         print('loss at test subject for action : ' + str(action) + ' is: ' + str(running_loss / n))
         n_batches += n
     print('overall average loss in mm is: ' + str(accum_loss / n_batches))
+    return accum_loss / n_batches
 
 
 if __name__ == '__main__':

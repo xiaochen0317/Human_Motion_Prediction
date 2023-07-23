@@ -9,8 +9,6 @@
       <change beforePath="$PROJECT_DIR$/checkpoints/CKPT_3D_H36M/h36_3d_25frames_ckpt" beforeDir="false" afterPath="$PROJECT_DIR$/checkpoints/CKPT_3D_H36M/h36_3d_25frames_ckpt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/main_h36_3d.py" beforeDir="false" afterPath="$PROJECT_DIR$/main_h36_3d.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/model_copy.py" beforeDir="false" afterPath="$PROJECT_DIR$/model_copy.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/h36motion3d.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/h36motion3d.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/utils/parser.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/parser.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/utils/partition.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/partition.py" afterDir="false" />
     </list>
@@ -39,14 +37,14 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "RunOnceActivity.OpenProjectViewOnStart": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "last_opened_file_path": "/home/yons/fuxian/MRT-main/MRT-main",
-    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/home/yons/Project-master&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
   }
-}]]></component>
+}</component>
   <component name="RunManager" selected="Python.main_h36_3d">
     <configuration name="bone_length" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="DMS-STGAT" />
@@ -185,9 +183,9 @@
     <recent_temporary>
       <list>
         <item itemvalue="Python.parser" />
-        <item itemvalue="Python.test" />
         <item itemvalue="Python.partition" />
         <item itemvalue="Python.model_copy" />
+        <item itemvalue="Python.test" />
         <item itemvalue="Python.bone_length" />
       </list>
     </recent_temporary>
@@ -243,7 +241,14 @@
       <option name="project" value="LOCAL" />
       <updated>1689929436004</updated>
     </task>
-    <option name="localTasksCounter" value="7" />
+    <task id="LOCAL-00007" summary="变更">
+      <created>1690025652329</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1690025652329</updated>
+    </task>
+    <option name="localTasksCounter" value="8" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">

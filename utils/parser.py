@@ -28,7 +28,7 @@ parser.add_argument('--embedding_dim', type=int, default=40, help='dimensions fo
 parser.add_argument('--input_dim', type=int, default=3, help='dimensions of the input coordinates')
 parser.add_argument('--st_gcnn_dropout', type=float, default=0.1, help='st-gcnn dropout')
 parser.add_argument('--ccnn_dropout', type=float, default=0.0, help='ccnn dropout')
-parser.add_argument('--tcnn_dropout', type=float, default=0.1, help='tcnn dropout')
+parser.add_argument('--tcnn_dropout', type=float, default=0.0, help='tcnn dropout')
 
 # ARGS FOR THE TRAINING
 
@@ -40,9 +40,9 @@ parser.add_argument('--batch_size', type=int, default=256, help='batch size')
 parser.add_argument('--batch_size_test', type=int, default=256, help='batch size for the test set')
 parser.add_argument('--lr', type=int, default=1e-02, help='Learning rate of the optimizer')
 parser.add_argument('--use_scheduler', type=bool, default=True, help='use MultiStepLR scheduler')
-parser.add_argument('--milestones', type=list, default=[30, 40],
+parser.add_argument('--milestones', type=list, default=[20, 30, 40],
                     help='the epochs after which the learning rate is adjusted by gamma')
-parser.add_argument('--gamma', type=float, default=0.1,
+parser.add_argument('--gamma', type=float, default=0.2,
                     help='gamma correction to the learning rate, after reaching the milestone epochs')
 parser.add_argument('--clip_grad', type=float, default=None, help='select max norm to clip gradients')
 parser.add_argument('--model_path', type=str, default='./checkpoints/CKPT_3D_H36M',
@@ -56,13 +56,14 @@ parser.add_argument('--actions_to_consider', default='all',
                     help='Actions to visualize.Choose either all or a list of actions')
 parser.add_argument('--n_viz', type=int, default='2', help='Numbers of sequences to visualize for each action')
 
-parser.add_argument('--hidden_features', type=int, default=32)
+parser.add_argument('--hidden_features', type=int, default=64)
 parser.add_argument('--heads', type=int, default=8)
 parser.add_argument('--loss_parameter', type=float, default=0.0)
-parser.add_argument('--lr_decay', type=float, default=0.98)
+parser.add_argument('--lr_decay', type=float, default=1)
 parser.add_argument('--alpha', type=float, default=0.5)
-parser.add_argument('--spatial_scales', type=list, default=[22, 12, 7, 3])
-parser.add_argument('--temporal_scales', type=list, default=[10, 6, 3])
+parser.add_argument('--spatial_scales', type=list, default=[22])
+parser.add_argument('--temporal_scales', type=list, default=[10])
 parser.add_argument('--temporal_scales2', type=list, default=[25, 15, 5])
+parser.add_argument('--d_model', type=int, default=128)
 
 args = parser.parse_args()

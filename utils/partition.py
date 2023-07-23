@@ -25,11 +25,11 @@ class GCNLayer(nn.Module):
             self.bias.data.fill_(0.0)
 
     def forward(self, x, adj, mask= None):
-        x = x.unsqueeze(0) if x.dim() == 2 else x
-        adj = adj.unsqueeze(0) if adj.dim() == 2 else adj
+        # x = x.unsqueeze(0) if x.dim() == 2 else x
+        # adj = adj.unsqueeze(0) if adj.dim() == 2 else adj
         B, N, C = adj.size()
 
-        out = self.lin(x)
+        out = self.lin(x).detach()
         out = torch.matmul(adj, out)
 
         if self.bias is not None:
@@ -44,19 +44,23 @@ class GCNLayer(nn.Module):
 class PoolingGNN(nn.Module):
     def __init__(self, in_features, hidden_features, out_features, normalize=False, linear=True):
         super(PoolingGNN, self).__init__()
-        self.conv1 = GCNLayer(in_features, hidden_features, normalize)
-        self.bn1 = nn.BatchNorm1d(hidden_features)
-        self.conv2 = GCNLayer(hidden_features, hidden_features, normalize)
-        self.bn2 = nn.BatchNorm1d(hidden_features)
-        self.conv3 = GCNLayer(hidden_features, out_features, normalize)
+        # self.conv1 = GCNLayer(in_features, hidden_features, normalize)
+        # self.bn1 = nn.BatchNorm1d(hidden_features)
+        # self.conv2 = GCNLayer(hidden_features, hidden_features, normalize)
+        # self.bn2 = nn.BatchNorm1d(hidden_features)
+        # self.conv3 = GCNLayer(hidden_features, out_features, normalize)
         self.bn3 = nn.BatchNorm1d(out_features)
         self.conv_1 = GCNLayer(in_features, out_features, normalize)
-        self.bn_1 = nn.BatchNorm1d(out_features)
+        # self.bn_1 = nn.BatchNorm1d(out_features)
 
         if linear is True:
             self.linear = nn.Linear(2 * hidden_features + out_features, out_features)
         else:
             self.linear = None
+        if in_features != out_features:
+            self.residual = nn.Sequential(nn.Linear(in_features, out_features))
+        else:
+            self.residual = nn.Identity()
 
     def bn(self, i, x):
         batch_size, num_nodes, num_features = x.size()
@@ -68,10 +72,11 @@ class PoolingGNN(nn.Module):
     def forward(self, x, adj, mask=None):
         batch_size, num_nodes, in_channels = x.size()
 
-        x0 = x
+        x0 = self.residual(x)
         # x1 = self.bn(1, self.conv1(x0, adj, mask).relu())
         # x2 = self.bn(2, self.conv2(x1, adj, mask).relu())
         x3 = self.bn(3, self.conv_1(x, adj, mask).relu())
+        x3 = x3 + x0
 
         # x = torch.cat([x1, x2, x3], dim=-1)
 
@@ -87,7 +92,7 @@ class DiffPoolingLayer(nn.Module):
         self.num_clusters = num_clusters
         self.GNN_Pool = PoolingGNN(in_features, hidden_features, num_clusters)
         # todo:embedding?
-        self.GNN_Embed = PoolingGNN(in_features, hidden_features, hidden_features, linear=False)
+        # self.GNN_Embed = PoolingGNN(in_features, hidden_features, hidden_features, linear=False)
         self.softmax = nn.Softmax(dim=2)
 
     def forward(self, src, adj, mask=None):
