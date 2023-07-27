@@ -1,7 +1,7 @@
 import os
 from utils import h36motion3d as datasets
 from torch.utils.data import DataLoader
-from model_copy import Model, Model_Reverse
+from model_copy import Model
 import matplotlib.pyplot as plt
 import torch.optim as optim
 import torch.autograd
@@ -44,12 +44,10 @@ def lr_decay(optimizer, lr_now, gamma):
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('Using device: %s' % device)
 
-model = Model(args.input_dim, args.hidden_features, args.input_n, args.output_n, args.st_gcnn_dropout,
-              args.n_tcnn_layers, args.tcnn_kernel_size, args.tcnn_dropout, args.heads, args.alpha,
-              args.spatial_scales, args.temporal_scales).to(device)
-# model_reverse = Model_Reverse(args.input_dim, args.hidden_features, args.output_n, args.input_n, args.st_gcnn_dropout,
-#                               args.n_tcnn_layers, args.tcnn_kernel_size, args.tcnn_dropout, args.heads, args.alpha,
-#                               args.spatial_scales, args.temporal_scales2).to(device)
+model = Model(args.input_dim, args.hidden_features, args.input_n, args.output_n, args.st_attn_dropout,
+              args.st_cnn_dropout, args.n_tcnn_layers, args.tcnn_kernel_size, args.tcnn_dropout, args.heads,
+              args.spatial_scales, args.temporal_scales, args.temporal_scales2).to(device)
+
 
 print('total number of parameters of the network is: ' + str(
     sum(p.numel() for p in model.parameters() if p.requires_grad)))
@@ -60,7 +58,7 @@ model_name = 'h36_3d_' + str(args.output_n) + 'frames_ckpt'
 def train():
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-05)
     # optimizer_reverse = optim.Adam(model_reverse.parameters(), lr=args.lr, weight_decay=1e-05)
-    torch.autograd.set_detect_anomaly(True)
+    # torch.autograd.set_detect_anomaly(True)
 
     if args.use_scheduler:
         scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.gamma)
@@ -97,25 +95,21 @@ def train():
             batch_dim = batch.shape[0]
             n += batch_dim
 
-            sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3, 3).permute(
-                0, 3, 1, 2)
+            # 改变
+            sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3, 3).\
+                permute(0, 3, 1, 2)
             sequences_gt = batch[:, args.input_n:args.input_n + args.output_n, dim_used].view(-1, args.output_n,
                                                                                               len(dim_used) // 3, 3)
 
             optimizer.zero_grad()
             # optimizer_reverse.zero_grad()
 
-            sequences_predict, l, e = model(sequences_train)
+            sequences_predict = model(sequences_train)
             sequences_predict = sequences_predict.permute(0, 1, 3, 2)  # B, T， J， 3
-            # sequences_predict_reverse = sequences_predict.flip(dims=[1]).permute(0, 3, 1, 2)
-            # sequences_predict_reverse_predict, l1, e1 = model_reverse(sequences_predict_reverse)
-            # sequences_predict_reverse_predict = sequences_predict_reverse_predict.permute(0, 1, 3, 2)
-            # sequences_reverse_gt = batch[:, 0:args.input_n, dim_used].flip(dims=[1]).view(-1, args.input_n, len(dim_used) // 3, 3)
-            # loss_reverse = mpjpe_error(sequences_predict_reverse_predict, sequences_reverse_gt)
 
             loss1 = mpjpe_error(sequences_predict, sequences_gt)
-            loss2 = bone_length_loss(sequences_train.permute(0, 2, 3, 1),
-                                     sequences_predict, I_link, J_link)
+            # loss2 = bone_length_loss(sequences_train.permute(0, 2, 3, 1),
+            #                          sequences_predict, I_link, J_link)
 
             # loss = loss1 + args.loss_parameter * loss2 + l + 0.1*e
             loss = loss1
@@ -124,7 +118,6 @@ def train():
             if cnt % 200 == 0:
                 print('[%d, %5d]  training loss: %.3f' % (epoch + 1, cnt + 1, loss1.item()))
                 # print('loss: %.3f, l: %.3f, e: %.3f' % (loss1, l, e))
-                # print(torch.gradient(l))
 
             # loss_reverse.backward(retain_graph=True)
             # optimizer_reverse.step()
@@ -148,31 +141,32 @@ def train():
                 batch_dim = batch.shape[0]
                 n += batch_dim
 
-                sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3,
-                                                                          3).permute(0, 3, 1, 2)
+                sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3, 3).\
+                permute(0, 3, 1, 2)
                 sequences_gt = batch[:, args.input_n:args.input_n + args.output_n, dim_used].view(-1, args.output_n,
                                                                                                   len(dim_used) // 3, 3)
 
-                sequences_predict, l, e = model(sequences_train)
+                sequences_predict = model(sequences_train)
                 sequences_predict = sequences_predict.permute(0, 1, 3, 2)  # B, T, J, 3
-
                 loss1 = mpjpe_error(sequences_predict, sequences_gt)
-                loss2 = bone_length_loss(sequences_train.permute(0, 2, 3, 1),
-                                         sequences_predict, I_link, J_link)
-                loss = loss1 + args.loss_parameter * loss2 + e
+                # loss2 = bone_length_loss(sequences_train.permute(0, 2, 3, 1),
+                #                          sequences_predict, I_link, J_link)
+                # loss = loss1 + args.loss_parameter * loss2 + e
 
                 if cnt % 200 == 0:
                     print('[%d, %5d]  validation loss: %.3f' % (epoch + 1, cnt + 1, loss1.item()))
                 running_loss += loss1 * batch_dim
             val_loss.append(running_loss.detach().cpu() / n)
-        test_error=test()
-        print('epoch %d  training loss: %.3f, validation loss: %.3f, test: %.3f' % (epoch + 1, train_loss[-1], val_loss[-1], test_error))
+            # print(n)
+        test_error = test()
+        print('epoch %d  training loss: %.3f, validation loss: %.3f, test: %.3f' %
+              (epoch + 1, train_loss[-1], val_loss[-1], test_error))
         # if args.use_scheduler:
         #     scheduler.step()
         #     if val_loss[-1] < loss_threshold:
         #         scheduler_loss.step(val_loss[-1])
 
-        if (epoch + 1) % 20 == 0:
+        if (epoch + 1) % 50 == 0:
             plt.figure(1)
             plt.plot(train_loss, 'r', label='Train loss')
             plt.plot(val_loss, 'g', label='Val loss')
@@ -181,22 +175,17 @@ def train():
         if args.use_scheduler:
             scheduler.step()
 
-        # if val_loss[-1] < best_acc:
-        #     print('----saving model-----')
-        #     torch.save(model.state_dict(), os.path.join(args.model_path, model_name))
-        #     best_acc = val_loss[-1]
-        #     print('best loss: %.3f' % best_acc)
         if test_error < best_acc:
             print('----saving model-----')
             torch.save(model.state_dict(), os.path.join(args.model_path, model_name))
-            best_acc = val_loss[-1]
-            print('best loss: %.3f' % test_error)
+            best_acc = test_error
+        print('best loss: %.3f' % best_acc)
 
 
 def test():
     # print(args.model_path)
     # print(model_name)
-    # model.load_state_dict(torch.load(os.path.join(args.model_path, model_name)))
+    model.load_state_dict(torch.load(os.path.join(args.model_path, model_name)))
     model.eval()
     # print(model)
     accum_loss = 0
@@ -229,18 +218,17 @@ def test():
 
                 all_joints_seq = batch.clone()[:, args.input_n:args.input_n + args.output_n, :]
 
-                sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3,
-                                                                          3).permute(0, 3, 1, 2)
+                sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3, 3).\
+                permute(0, 3, 1, 2)
                 sequences_gt = batch[:, args.input_n:args.input_n + args.output_n, :]
 
-                sequences_predict, l, e = model(sequences_train)
+                sequences_predict = model(sequences_train)
                 sequences_predict = sequences_predict.permute(0, 1, 3, 2).contiguous().view(-1, args.output_n,
-                                                                                                 len(dim_used))
+                                                                                            len(dim_used))
 
                 all_joints_seq[:, :, dim_used] = sequences_predict
 
                 all_joints_seq[:, :, index_to_ignore] = all_joints_seq[:, :, index_to_equal]
-
                 loss = mpjpe_error(all_joints_seq.view(-1, args.output_n, 32, 3),
                                    sequences_gt.view(-1, args.output_n, 32, 3))
                 running_loss += loss * batch_dim
@@ -248,6 +236,7 @@ def test():
 
         print('loss at test subject for action : ' + str(action) + ' is: ' + str(running_loss / n))
         n_batches += n
+    # print(n_batches)
     print('overall average loss in mm is: ' + str(accum_loss / n_batches))
     return accum_loss / n_batches
 

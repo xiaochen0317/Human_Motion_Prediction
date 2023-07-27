@@ -17,7 +17,7 @@ https://github.com/wei-mao-2019/HisRepItself/blob/master/utils/h36motion3d.py
 
 class Datasets(Dataset):
 
-    def __init__(self, data_dir,input_n,output_n,skip_rate, actions=None, split=0):
+    def __init__(self, data_dir,input_n,output_n,skip_rate, actions=None,test_manner='all', split=0):
         """
         :param path_to_data:
         :param actions:
@@ -116,19 +116,33 @@ class Datasets(Dataset):
                     # print("action:{}".format(action))
                     # print("subact1:{}".format(num_frames1))
                     # print("subact2:{}".format(num_frames2))
-                    fs_sel1, fs_sel2 = data_utils.find_indices_256(num_frames1, num_frames2, seq_len,
-                                                                   input_n=self.in_n)
+                    if test_manner == "all":
+                        # # 全部数据用来测试
+                        fs_sel1 = [np.arange(i, i + seq_len) for i in range(num_frames1 - 100)]
+                        fs_sel2 = [np.arange(i, i + seq_len) for i in range(num_frames2 - 100)]
+                        valid_frames = [x[0] for x in fs_sel1]
+                        tmp_data_idx_1 = [key] * len(valid_frames)
+                        tmp_data_idx_2 = valid_frames
+                        self.data_idx.extend(zip(tmp_data_idx_1, tmp_data_idx_2))
 
-                    valid_frames = fs_sel1[:, 0]
-                    tmp_data_idx_1 = [key] * len(valid_frames)
-                    tmp_data_idx_2 = list(valid_frames)
-                    self.data_idx.extend(zip(tmp_data_idx_1, tmp_data_idx_2))
+                        valid_frames = [x[0] for x in fs_sel2]
+                        tmp_data_idx_1 = [key + 1] * len(valid_frames)
+                        tmp_data_idx_2 = valid_frames
+                        self.data_idx.extend(zip(tmp_data_idx_1, tmp_data_idx_2))
+                    elif test_manner == "8":
+                        # 随机取 8 个
+                        fs_sel1, fs_sel2 = data_utils.find_indices_srnn(num_frames1, num_frames2, seq_len)
+                        valid_frames = fs_sel1[:, 0]
+                        tmp_data_idx_1 = [key] * len(valid_frames)
+                        tmp_data_idx_2 = list(valid_frames)
+                        self.data_idx.extend(zip(tmp_data_idx_1, tmp_data_idx_2))
 
-                    valid_frames = fs_sel2[:, 0]
-                    tmp_data_idx_1 = [key + 1] * len(valid_frames)
-                    tmp_data_idx_2 = list(valid_frames)
-                    self.data_idx.extend(zip(tmp_data_idx_1, tmp_data_idx_2))
-                    key += 2
+                        valid_frames = fs_sel2[:, 0]
+                        tmp_data_idx_1 = [key + 1] * len(valid_frames)
+                        tmp_data_idx_2 = list(valid_frames)
+                        self.data_idx.extend(zip(tmp_data_idx_1, tmp_data_idx_2))
+
+                    key += self.sample_rate
 
         # ignore constant joints and joints at same position with other joints
         joint_to_ignore = np.array([0, 1, 6, 11, 16, 20, 23, 24, 28, 31])

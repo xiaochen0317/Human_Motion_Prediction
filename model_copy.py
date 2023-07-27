@@ -46,12 +46,11 @@ class Spatial_Positional_Encoding(nn.Module):
 
 
 class AttentionLayer(nn.Module):
-    def __init__(self, in_features, hidden_features, alpha, dropout=0.1, negative_slope=0.2):
+    def __init__(self, in_features, hidden_features, dropout=0.1, negative_slope=0.2):
         super(AttentionLayer, self).__init__()
-        self.dropout = dropout
+        # self.dropout = dropout
         self.in_features = in_features
         self.hidden_features = hidden_features
-        self.alpha = alpha
         self.negative_slope = negative_slope
 
         self.lin = nn.Linear(in_features, hidden_features, bias=False)
@@ -59,6 +58,8 @@ class AttentionLayer(nn.Module):
         nn.init.normal_(self.att_src, mean=0, std=math.sqrt(hidden_features))
         self.att_dst = nn.Parameter(torch.Tensor(1, 1, hidden_features))
         nn.init.normal_(self.att_dst, mean=0, std=math.sqrt(hidden_features))
+
+        self.dropout = nn.Dropout(dropout)
 
         # if bias and concat:
         #     self.bias = nn.Parameter(torch.Tensor(heads * out_channels))
@@ -89,7 +90,7 @@ class AttentionLayer(nn.Module):
         attention = attention1.unsqueeze(1) + attention2.unsqueeze(2)  # [B, N, N]
         attention = attention.softmax(dim=1)
         # attention = torch.where(attention < 0.75, torch.zeros_like(attention), attention)
-        attention = F.dropout(attention, p=self.dropout, training=self.training)
+        attention = self.dropout(attention)
 
         if self.bias is not None:
             # todo: 加权
@@ -101,12 +102,27 @@ class AttentionLayer(nn.Module):
         return attention  # [B, N, N]
 
 
+class Mix_Coefficient(nn.Module):
+    def __init__(self, dim, channel, scales):
+        super(Mix_Coefficient, self).__init__()
+        self.linear1 = nn.Linear(channel, 1, bias=True)
+        self.relu = nn.ReLU()
+        self.linear2 = nn.Linear(dim, scales, bias=True)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, src):
+        src = self.relu(self.linear1(src).squeeze(-1))
+        src = self.linear2(src)
+        src = self.softmax(src)
+        src = torch.ones([src.size(1), src.size(2)]) / src.size(2)
+        return src
+
+
 class DMS_STAttention(nn.Module):
-    def __init__(self, in_features, hidden_features, out_features, alpha, spatial_scales, temporal_scales):
+    def __init__(self, in_features, out_features, hidden_features, spatial_scales, temporal_scales):
         super(DMS_STAttention, self).__init__()
         self.spatial_scales = spatial_scales
         self.temporal_scales = temporal_scales
-        self.alpha = alpha
         self.in_features = in_features
         self.hidden_features = hidden_features
         self.out_features = out_features
@@ -115,33 +131,24 @@ class DMS_STAttention(nn.Module):
         self.temporal_gat = nn.ModuleList()
         self.temporal_pool = nn.ModuleList()
 
+        self.s_coef = Mix_Coefficient(spatial_scales[0], in_features, len(spatial_scales))
+        self.t_coef = Mix_Coefficient(temporal_scales[0], in_features, len(temporal_scales))
+
         # self.spatial_left = []
         # self.spatial_right = []
         # self.temporal_left = []
         # self.temporal_right = []
 
         for i in range(len(spatial_scales)):
-            self.spatial_gat.append(AttentionLayer(in_features, hidden_features, alpha))
+            self.spatial_gat.append(AttentionLayer(in_features, hidden_features))
             if i < len(spatial_scales) - 1:
                 self.spatial_pool.append(
-                    DiffPoolingLayer(self.in_features, self.hidden_features, self.spatial_scales[i + 1]))
-                # self.spatial_left.append(nn.Parameter(torch.FloatTensor(1, spatial_scales[0], spatial_scales[i + 1])))
-                # stdv = 1. / math.sqrt(self.spatial_left[i].size(1))
-                # self.spatial_left[i].data.uniform_(-stdv, stdv)
-                # self.spatial_right.append(nn.Parameter(torch.FloatTensor(1, spatial_scales[i + 1], spatial_scales[0])))
-                # stdv = 1. / math.sqrt(self.spatial_right[i].size(1))
-                # self.spatial_right[i].data.uniform_(-stdv, stdv)
+                    DiffPoolingLayer(self.in_features, 32, self.spatial_scales[i + 1]))
         for i in range(len(temporal_scales)):
-            self.temporal_gat.append(AttentionLayer(in_features, hidden_features, alpha))
+            self.temporal_gat.append(AttentionLayer(in_features, hidden_features))
             if i < len(temporal_scales) - 1:
                 self.temporal_pool.append(
-                    DiffPoolingLayer(self.in_features, self.hidden_features, self.temporal_scales[i + 1]))
-                # self.temporal_left.append(nn.Parameter(torch.FloatTensor(1, temporal_scales[0], temporal_scales[i + 1])))
-                # stdv = 1. / math.sqrt(self.temporal_left[i].size(1))
-                # self.temporal_left[i].data.uniform_(-stdv, stdv)
-                # self.temporal_right.append(nn.Parameter(torch.FloatTensor(1, temporal_scales[i + 1], temporal_scales[0])))
-                # stdv = 1. / math.sqrt(self.temporal_right[i].size(1))
-                # self.temporal_right[i].data.uniform_(-stdv, stdv)
+                    DiffPoolingLayer(self.in_features, 32, self.temporal_scales[i + 1]))
 
     def forward(self, src, device='cuda:0'):
         B, C, T, J = src.size()
@@ -149,18 +156,16 @@ class DMS_STAttention(nn.Module):
         s_ma1 = []
         s_ma2 = []
         # Spatial GAT
-        e = 0
-        l = 0
         spatial_input = src.permute(0, 2, 3, 1).reshape(B * T, J, C)
+        s_coef = self.s_coef(spatial_input)
         spatial_attention = []
         for i in range(len(self.spatial_scales) - 1):
             spatial_attention.append(self.spatial_gat[i](spatial_input))  # B*T，J， J
-            spatial_input, s1, l1, e1 = self.spatial_pool[i](spatial_input, spatial_attention[i])
-            l += l1
-            e += e1
+            spatial_input, s1 = self.spatial_pool[i](spatial_input, spatial_attention[i])
             s_ma1.append(s1)
         spatial_attention.append(self.spatial_gat[-1](spatial_input))
-        sa_fusion = spatial_attention[0]
+        coef = s_coef[:, 0].unsqueeze(-1).unsqueeze(-1).repeat(1, self.spatial_scales[0], self.spatial_scales[0])
+        sa_fusion = spatial_attention[0] * coef
 
         for i in range(1, len(self.spatial_scales)):  # 从1尺度开始计算
             # 初始化邻接矩阵列表
@@ -172,21 +177,21 @@ class DMS_STAttention(nn.Module):
                     S = torch.matmul(S, s_ma1[j])
             # 将结果添加到邻接矩阵列表中
             A = S @ A_prev @ S.transpose(1, 2)
-            sa_fusion += A
-        sa_fusion = sa_fusion.softmax(dim=1)
+            coef = s_coef[:, i].unsqueeze(-1).unsqueeze(-1).repeat(1, self.spatial_scales[0], self.spatial_scales[0])
+            sa_fusion += A * coef
+        # sa_fusion = sa_fusion / len(self.spatial_scales)
         # sa_fusion = torch.where(sa_fusion < 0.75, torch.zeros_like(sa_fusion), sa_fusion)
 
         # Temporal GAT
         temporal_input = src.permute(0, 3, 2, 1).reshape(B * J, T, C)
+        t_coef = self.t_coef(temporal_input)
         temporal_attention = []
         for i in range(len(self.temporal_scales) - 1):
             temporal_attention.append(self.temporal_gat[i](temporal_input))
-            temporal_input, s2, l2, e2 = self.temporal_pool[i](temporal_input, temporal_attention[i])
-            l += l2
-            e += e2
+            temporal_input, s2 = self.temporal_pool[i](temporal_input, temporal_attention[i])
             s_ma2.append(s2)
         temporal_attention.append(self.temporal_gat[-1](temporal_input))
-        ta_fusion = temporal_attention[0]
+        ta_fusion = temporal_attention[0] * t_coef[:, 0].unsqueeze(-1).unsqueeze(-1).repeat(1, self.temporal_scales[0], self.temporal_scales[0])
         for i in range(1, len(self.temporal_scales)):  # 从1尺度开始计算
             # 初始化邻接矩阵列表
             A_prev = temporal_attention[i]  # 每个尺度的注意力矩阵
@@ -197,28 +202,159 @@ class DMS_STAttention(nn.Module):
                     S = torch.matmul(S, s_ma2[j])
             # 将结果添加到邻接矩阵列表中
             A = S @ A_prev @ S.transpose(1, 2)
-            ta_fusion += A
-        ta_fusion = ta_fusion.softmax(dim=1)
+            # ta_fusion += A
+            ta_fusion += A * t_coef[:, 0].unsqueeze(-1).unsqueeze(-1).repeat(1, self.temporal_scales[0], self.temporal_scales[0])
+        # ta_fusion = ta_fusion / len(self.temporal_scales)
         # ta_fusion = torch.where(ta_fusion < 0.75, torch.zeros_like(ta_fusion), ta_fusion)
 
         sa_fusion = sa_fusion.reshape(B, T, J, J)
         ta_fusion = ta_fusion.reshape(B, J, T, T)
-        return sa_fusion, ta_fusion, l, e
+        return sa_fusion, ta_fusion
+
+
+# class DMS_STAttention(nn.Module):
+#     def __init__(self, in_features, out_features, hidden_features, heads, spatial_scales, temporal_scales,
+#                  attn_dropout=0.1):
+#         super(DMS_STAttention, self).__init__()
+#         self.spatial_scales = spatial_scales
+#         self.temporal_scales = temporal_scales
+#         self.in_features = in_features
+#         self.hidden_features = hidden_features
+#         self.out_features = out_features
+#         self.heads = heads
+#
+#         self.W = nn.Parameter(torch.FloatTensor(heads, in_features, out_features))
+#         nn.init.xavier_uniform_(self.W, gain=1.414)
+#
+#         self.as_src = []
+#         self.as_dst = []
+#         self.at_src = []
+#         self.at_dst = []
+#         for i in range(len(spatial_scales)):
+#             self.as_src.append(nn.Parameter(torch.FloatTensor(heads, out_features, 1)).to('cuda:0'))
+#             nn.init.xavier_uniform_(self.as_src[i], gain=1.414)
+#             self.as_dst.append(nn.Parameter(torch.FloatTensor(heads, out_features, 1)).to('cuda:0'))
+#             nn.init.xavier_uniform_(self.as_dst[i], gain=1.414)
+#         for j in range(len(temporal_scales)):
+#             self.at_src.append(nn.Parameter(torch.FloatTensor(heads, out_features, 1)).to('cuda:0'))
+#             nn.init.xavier_uniform_(self.at_src[j], gain=1.414)
+#             self.at_dst.append(nn.Parameter(torch.FloatTensor(heads, out_features, 1)).to('cuda:0'))
+#             nn.init.xavier_uniform_(self.at_dst[j], gain=1.414)
+#
+#         self.leaky_relu = nn.LeakyReLU(0.2)
+#         self.softmax = nn.Softmax(dim=-1)
+#         self.dropout = nn.Dropout(attn_dropout)
+#
+#         self.spatial_pool = nn.ModuleList()
+#         self.temporal_pool = nn.ModuleList()
+#         self.spatial_gat = nn.ModuleList()
+#         self.temporal_gat = nn.ModuleList()
+#
+#         self.s_coef = Mix_Coefficient(spatial_scales[0], in_features, len(spatial_scales))
+#         self.t_coef = Mix_Coefficient(temporal_scales[0], in_features, len(temporal_scales))
+#
+#         for i in range(len(spatial_scales) - 1):
+#             self.spatial_pool.append(DiffPoolingLayer(in_features, hidden_features, spatial_scales[i + 1]))
+#         for i in range(len(temporal_scales) - 1):
+#             self.temporal_pool.append(DiffPoolingLayer(in_features, hidden_features, temporal_scales[i + 1]))
+#
+#     def forward(self, src):
+#         # src: B, T, J, C_in
+#         # B, T, J, C_out
+#         B, T, J, C = src.size()
+#         # get spatial/temporal input and MoE coefficient
+#         spatial_input = src.reshape(B * T, J, C).unsqueeze(1)
+#         # todo:要不要把coef的输入改为不同尺度的输入
+#         spatial_coef = self.s_coef(src.reshape(B * T, J, -1))  # B*T, s_scales
+#         temporal_input = src.permute(0, 2, 1, 3).reshape(B * J, T, C).unsqueeze(1)
+#         temporal_coef = self.t_coef(src.permute(0, 2, 1, 3).reshape(B * J, T, -1))  # B*J, t_scales
+#
+#         # set list of spatial/temporal pooling matrix and attention matrix
+#         spatial_pooling = []
+#         spatial_attention = []
+#         temporal_pooling = []
+#         temporal_attention = []
+#
+#         # todo:s作为左右乘的元素？
+#         # spatial GAT
+#         for i in range(len(self.spatial_scales)):
+#             # print(self.as_src[i].device)
+#             spatial_input_emb = torch.matmul(spatial_input, self.W)
+#             attn_src = torch.matmul(spatial_input_emb, self.as_src[i])  # B*T, H, J, 1
+#             attn_dst = torch.matmul(spatial_input_emb, self.as_dst[i])  # B*T, H, J, 1
+#             attn = attn_src.expand(-1, -1, -1, self.spatial_scales[i]) + \
+#                    attn_dst.expand(-1, -1, -1, self.spatial_scales[i]).permute(0, 1, 3, 2)
+#             attn = self.leaky_relu(attn)
+#             attn = self.softmax(attn)
+#             attn = self.dropout(attn)
+#             spatial_attention.append(attn)  # B*T，H, J， J
+#             if i < len(self.spatial_scales) - 1:
+#                 spatial_input, pooling = self.spatial_pool[i](spatial_input, spatial_attention[i])
+#                 spatial_pooling.append(pooling)
+#         s_coef = spatial_coef[:, 0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).\
+#             repeat(1, self.heads, self.spatial_scales[0], self.spatial_scales[0])
+#         sa_fusion = spatial_attention[0] * s_coef
+#
+#         for i in range(1, len(self.spatial_scales)):
+#             A_prev = spatial_attention[i]  # 每个尺度的注意力矩阵
+#             S = spatial_pooling[0]  # 初始化S为S(0,1)
+#             if i >= 1:  # 如果i大于1，那么需要计算S(0,i)
+#                 for j in range(1, i):  # 对每个池化矩阵进行循环
+#                     S = torch.matmul(S, spatial_pooling[j])
+#             A = torch.matmul(torch.matmul(S, A_prev), S.transpose(2, 3))
+#             s_coef = spatial_coef[:, i].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1). \
+#                 repeat(1, self.heads, self.spatial_scales[0], self.spatial_scales[0])
+#             sa_fusion += A * s_coef
+#
+#         # temporal GAT
+#         for i in range(len(self.temporal_scales)):
+#             temporal_input_emb = torch.matmul(temporal_input, self.W)
+#             attn_src = torch.matmul(temporal_input_emb, self.at_src[i])  # B*J, H, T, 1
+#             attn_dst = torch.matmul(temporal_input_emb, self.at_dst[i])  # B*J, H, T, 1
+#             attn = attn_src.expand(-1, -1, -1, self.temporal_scales[i]) + \
+#                    attn_dst.expand(-1, -1, -1, self.temporal_scales[i]).permute(0, 1, 3, 2)
+#             attn = self.leaky_relu(attn)
+#             attn = self.softmax(attn)
+#             attn = self.dropout(attn)
+#             temporal_attention.append(attn)  # B*T，H, J， J
+#             if i < len(self.temporal_scales) - 1:
+#                 temporal_input, pooling = self.temporal_pool[i](temporal_input, temporal_attention[i])
+#                 temporal_pooling.append(pooling)
+#         t_coef = temporal_coef[:, 0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1). \
+#             repeat(1, self.heads, self.temporal_scales[0], self.temporal_scales[0])
+#         ta_fusion = temporal_attention[0] * t_coef
+#         for i in range(1, len(self.temporal_scales)):
+#             A_prev = temporal_attention[i]
+#             S = temporal_pooling[0]
+#             if i >= 1:
+#                 for j in range(1, i):
+#                     S = torch.matmul(S, temporal_pooling[j])
+#             A = torch.matmul(torch.matmul(S, A_prev), S.transpose(2, 3))
+#             t_coef = temporal_coef[:, i].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1). \
+#                 repeat(1, self.heads, self.temporal_scales[0], self.temporal_scales[0])
+#             ta_fusion += A * t_coef
+#         # todo:加上物理连接？
+#         src_emb = torch.matmul(src.unsqueeze(2), self.W)
+#         sa_fusion = sa_fusion.reshape(B, T, self.heads, J, J)
+#         ta_fusion = ta_fusion.reshape(B, J, self.heads, T, T)
+#         return src_emb, sa_fusion, ta_fusion
 
 
 class DMS_ST_GAT_layer(nn.Module):
-    def __init__(self, in_features, hidden_features, out_features, kernel_size, stride, dropout, alpha,
-                 spatial_scales, temporal_scales, bias=True):
+    def __init__(self, in_features, out_features, hidden_features, kernel_size, stride, heads, spatial_scales,
+                 temporal_scales, attn_dropout=0.1, dropout=0.1):
         super(DMS_ST_GAT_layer, self).__init__()
         self.kernel_size = kernel_size
         assert self.kernel_size[0] % 2 == 1
         assert self.kernel_size[1] % 2 == 1
         padding = ((self.kernel_size[0] - 1) // 2, (self.kernel_size[1] - 1) // 2)
 
-        self.attention = DMS_STAttention(in_features, hidden_features, out_features, alpha, spatial_scales,
+        # self.attention = DMS_STAttention(in_features, out_features, hidden_features, heads, spatial_scales,
+        #                                  temporal_scales, attn_dropout)
+        self.attention = DMS_STAttention(in_features, out_features, hidden_features, spatial_scales,
                                          temporal_scales)
 
-        self.tcn = nn.Sequential(
+        self.cnn = nn.Sequential(
             nn.Conv2d(in_features, out_features, (self.kernel_size[0], self.kernel_size[1]), (stride, stride), padding),
             nn.BatchNorm2d(out_features),
             nn.Dropout(dropout, inplace=True))
@@ -226,24 +362,27 @@ class DMS_ST_GAT_layer(nn.Module):
         if stride != 1 or in_features != out_features:
             self.residual = nn.Sequential(nn.Conv2d(in_features, out_features, kernel_size=1, stride=(1, 1)),
                                           nn.BatchNorm2d(out_features))
-
         else:
             self.residual = nn.Identity()
 
-        # todo: 加个Layer_norm
-        self.layer_norm = nn.LayerNorm(in_features, eps=1e-6)
         self.prelu = nn.PReLU()
 
     def forward(self, x):
         res = self.residual(x)
-        S, T, l, e = self.attention(x)  # [B, T, J, J] [B, J, T, T]
+        S, T = self.attention(x)  # [B, T, H, J, C_out] [B, T, H, J, J] [B, J, H, T, T]
+        # x = x.permute(0, 3, 1, 2)
         # todo:改一下乘法
-        x = torch.einsum('nctv,ntvw->nctw', (x, S))  # B 3 T J | B T J J  B 3 H T J
-        x = torch.einsum('nctv,nvtq->ncqv', (x, T))  # B 3 H T J | B J T T  B 3 H T J
-        x = self.tcn(x)  # B, C, T, J
-        x = x + res
-        x = self.prelu(x)
-        return x, l, e
+        out = torch.einsum('nctv,ntvw->nctw', (x, S))  # B T J C | B T J J  B T J C
+        # out = torch.matmul(S, x)
+        # out = torch.matmul(T, out.permute(0, 2, 1, 3)).permute(0, 2, 1, 3)
+        out = torch.einsum('nctv,nvtq->ncqv', (out, T))  # B T J C | B J T T  B T J C
+        # out = torch.mean(out, dim=2)
+        # out = out.permute(0, 3, 1, 2)  # B, C, T, J
+        out = self.cnn(out)  # B, C, T, J
+        out = out + res
+        out = self.prelu(out)
+        # out = out.permute(0, 2, 3, 1)
+        return out
 
 
 class Chomp1d(nn.Module):
@@ -307,6 +446,19 @@ class TemporalConvNet(nn.Module):
         return self.network(x)
 
 
+class TransformerDecodingLayer(nn.Module):
+    def __init__(self, d_model, n_head, num_layers, dropout=0.1, activation="relu"):
+        super(TransformerDecodingLayer, self).__init__()
+        dim_feedforward = 2 * d_model
+        self.transformer_layer = nn.TransformerDecoderLayer(d_model, n_head, dim_feedforward, dropout, activation,
+                                                            batch_first=True)
+        self.transformer = nn.TransformerDecoder(self.transformer_layer, num_layers)
+
+    def forward(self, tgt, memory, mask=None):
+        tgt = self.transformer_layer(tgt, memory, mask)
+        return tgt
+
+
 class TCN_Layer(nn.Module):
     def __init__(self,
                  in_channels,
@@ -330,46 +482,10 @@ class TCN_Layer(nn.Module):
         return output
 
 
-class TransformerDecodingLayer(nn.Module):
-    def __init__(self, d_model, n_head, num_layers, dropout=0.1, activation="relu"):
-        super(TransformerDecodingLayer, self).__init__()
-        dim_feedforward = 2 * d_model
-        self.transformer_layer = nn.TransformerDecoderLayer(d_model, n_head, dim_feedforward, dropout, activation,
-                                                            batch_first=True)
-        self.transformer = nn.TransformerDecoder(self.transformer_layer, num_layers)
-
-    def forward(self, tgt, memory, mask=None):
-        tgt = self.transformer_layer(tgt, memory, mask)
-        return tgt
-
-
 class Model(nn.Module):
-    """
-    Shape:
-        - Input[0]: Input sequence in :math:`(N, in_channels,T_in, V)` format
-        - Output[0]: Output sequence in :math:`(N,T_out,in_channels, V)` format
-        where
-            :math:`N` is a batch size,
-            :math:`T_{in}/T_{out}` is a length of input/output sequence,
-            :math:`V` is the number of graph nodes.
-            :in_channels=number of channels for the coordiantes(default=3)
-            +
-    """
-
-    def __init__(self,
-                 in_features,
-                 hidden_features,
-                 input_time_frame,
-                 output_time_frame,
-                 st_gcnn_dropout,
-                 n_txcnn_layers,
-                 txc_kernel_size,
-                 txc_dropout,
-                 heads,
-                 alpha,
-                 spatial_scales,
-                 temporal_scales,
-                 bias=True):
+    def __init__(self, in_features, hidden_features, input_time_frame, output_time_frame, st_attn_dropout,
+                 st_cnn_dropout, n_txcnn_layers, txc_kernel_size, txc_dropout, heads, spatial_scales,
+                 temporal_scales, temporal_scales2):
 
         super(Model, self).__init__()
         self.input_time_frame = input_time_frame
@@ -377,15 +493,18 @@ class Model(nn.Module):
         self.st_gcnns = nn.ModuleList()
         self.n_txcnn_layers = n_txcnn_layers
         self.txcnns = nn.ModuleList()
-
-        self.st_gcnns.append(DMS_ST_GAT_layer(in_features, hidden_features, 32, [1, 1], 1, st_gcnn_dropout,
-                                              alpha, spatial_scales, temporal_scales))
-        self.st_gcnns.append(DMS_ST_GAT_layer(32, hidden_features, 64, [1, 1], 1, st_gcnn_dropout,
-                                              alpha, spatial_scales, temporal_scales))
-        self.st_gcnns.append(DMS_ST_GAT_layer(64, hidden_features, 32, [1, 1], 1, st_gcnn_dropout,
-                                              alpha, spatial_scales, temporal_scales))
-        self.st_gcnns.append(DMS_ST_GAT_layer(32, hidden_features, in_features, [1, 1], 1, st_gcnn_dropout,
-                                              alpha, spatial_scales, temporal_scales))
+        self.st_gcnns.append(DMS_ST_GAT_layer(in_features, 32, hidden_features, [1, 1], 1, heads, spatial_scales,
+                                              temporal_scales, st_attn_dropout, st_cnn_dropout))
+        self.st_gcnns.append(DMS_ST_GAT_layer(32, 64, hidden_features, [1, 1], 1, heads, spatial_scales,
+                                              temporal_scales, st_attn_dropout, st_cnn_dropout))
+        # self.st_gcnns.append(DMS_ST_GAT_layer(64, 128, hidden_features, [1, 1], 1, heads, spatial_scales,
+        #                                       temporal_scales, st_attn_dropout, st_cnn_dropout))
+        # self.st_gcnns.append(DMS_ST_GAT_layer(128, 64, hidden_features, [1, 1], 1, heads, spatial_scales,
+        #                                       temporal_scales, st_attn_dropout, st_cnn_dropout))
+        self.st_gcnns.append(DMS_ST_GAT_layer(64, 32, hidden_features, [1, 1], 1, heads, spatial_scales,
+                                              temporal_scales, st_attn_dropout, st_cnn_dropout))
+        self.st_gcnns.append(DMS_ST_GAT_layer(32, in_features, hidden_features, [1, 1], 1, heads, spatial_scales,
+                                              temporal_scales, st_attn_dropout, st_cnn_dropout))
 
         self.txcnns.append(TCN_Layer(input_time_frame, output_time_frame, txc_kernel_size, txc_dropout))
         # with kernel_size[3,3] the dimensinons of C,V will be maintained
@@ -397,13 +516,14 @@ class Model(nn.Module):
         for j in range(n_txcnn_layers):
             self.prelus.append(nn.PReLU())
 
+        # self.refine = DMS_ST_GAT_layer(in_features, hidden_features, in_features, [1, 1], 1, st_gcnn_dropout,
+        #                                alpha, spatial_scales, temporal_scales2)
+
     def forward(self, x):
         e = 0
         l = 0
         for gcn in self.st_gcnns:
-            x, l1, e1 = gcn(x)
-            e += e1
-            l += l1
+            x = gcn(x)
 
         x = x.permute(0, 2, 1, 3)  # prepare the input for the Time-Extrapolator-CNN (NCTV->NTCV)
 
@@ -412,82 +532,9 @@ class Model(nn.Module):
         for i in range(1, self.n_txcnn_layers):
             x = self.prelus[i](self.txcnns[i](x)) + x  # residual connection
 
-        return x, l, e
-
-
-class Model_Reverse(nn.Module):
-    """
-    Shape:
-        - Input[0]: Input sequence in :math:`(N, in_channels,T_in, V)` format
-        - Output[0]: Output sequence in :math:`(N,T_out,in_channels, V)` format
-        where
-            :math:`N` is a batch size,
-            :math:`T_{in}/T_{out}` is a length of input/output sequence,
-            :math:`V` is the number of graph nodes.
-            :in_channels=number of channels for the coordiantes(default=3)
-            +
-    """
-
-    def __init__(self,
-                 in_features,
-                 hidden_features,
-                 input_time_frame,
-                 output_time_frame,
-                 st_gcnn_dropout,
-                 n_txcnn_layers,
-                 txc_kernel_size,
-                 txc_dropout,
-                 heads,
-                 d_model,
-                 alpha,
-                 spatial_scales,
-                 temporal_scales,
-                 bias=True):
-
-        super(Model_Reverse, self).__init__()
-        self.input_time_frame = input_time_frame
-        self.output_time_frame = output_time_frame
-        self.st_gcnns = nn.ModuleList()
-        self.n_txcnn_layers = n_txcnn_layers
-        self.txcnns = nn.ModuleList()
-
-        self.st_gcnns.append(DMS_ST_GAT_layer(in_features, hidden_features, 32, [1, 1], 1, st_gcnn_dropout,
-                                              alpha, spatial_scales, temporal_scales))
-        self.st_gcnns.append(DMS_ST_GAT_layer(32, hidden_features, 64, [1, 1], 1, st_gcnn_dropout,
-                                              alpha, spatial_scales, temporal_scales))
-        self.st_gcnns.append(DMS_ST_GAT_layer(64, hidden_features, 128, [1, 1], 1, st_gcnn_dropout,
-                                              alpha, spatial_scales, temporal_scales))
-        self.st_gcnns.append(DMS_ST_GAT_layer(128, hidden_features, 64, [1, 1], 1, st_gcnn_dropout,
-                                              alpha, spatial_scales, temporal_scales))
-        self.st_gcnns.append(DMS_ST_GAT_layer(64, hidden_features, 32, [1, 1], 1, st_gcnn_dropout,
-                                              alpha, spatial_scales, temporal_scales))
-        self.st_gcnns.append(DMS_ST_GAT_layer(32, hidden_features, in_features, [1, 1], 1, st_gcnn_dropout,
-                                              alpha, spatial_scales, temporal_scales))
-
-        # self.txcnns.append(TCN_Layer(input_time_frame, output_time_frame, txc_kernel_size, txc_dropout))
-        # with kernel_size[3,3] the dimensinons of C,V will be maintained
-        # for i in range(1, n_txcnn_layers):
-        #     self.txcnns.append(TCN_Layer(output_time_frame, output_time_frame, txc_kernel_size, txc_dropout))
+        # x = x.permute(0, 2, 1, 3)
+        # x, l2, e2 = self.refine(x)
         #
-        # self.prelus = nn.ModuleList()
-        #
-        # for j in range(n_txcnn_layers):
-        #     self.prelus.append(nn.PReLU())
-        self.decoder.append(TransformerDecodingLayer(d_model=d_model, n_head=heads))
+        # x = x.permute(0, 2, 1, 3)
 
-    def forward(self, x):
-        e = 0
-        l = 0
-        for gcn in self.st_gcnns:
-            x, l1, e1 = gcn(x)
-            e += e1
-            l += l1
-
-        x = x.permute(0, 2, 1, 3)  # prepare the input for the Time-Extrapolator-CNN (NCTV->NTCV)
-
-        x = self.prelus[0](self.txcnns[0](x))
-
-        for i in range(1, self.n_txcnn_layers):
-            x = self.prelus[i](self.txcnns[i](x)) + x  # residual connection
-
-        return x, l, e
+        return x
