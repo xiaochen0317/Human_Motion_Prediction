@@ -1,7 +1,7 @@
 import os
 from utils import h36motion3d as datasets
 from torch.utils.data import DataLoader
-from model_copy import Model
+from model_copy2 import Model
 import matplotlib.pyplot as plt
 import torch.optim as optim
 import torch.autograd
@@ -52,7 +52,7 @@ model = Model(args.input_dim, args.hidden_features, args.input_n, args.output_n,
 print('total number of parameters of the network is: ' + str(
     sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
-model_name = 'h36_3d_' + str(args.output_n) + 'frames_ckpt'
+model_name = 'h36_3d_' + str(args.output_n) + 'frames_ckpt_test'
 
 
 def train():
@@ -85,7 +85,7 @@ def train():
 
     for epoch in range(args.n_epochs):
         running_loss = 0
-        # if epoch % 5 == 0:
+        # if epoch % 2 == 0:
         #     args.lr = lr_decay(optimizer, args.lr, args.lr_decay)
         n = 0
         model.train()
@@ -161,17 +161,13 @@ def train():
         test_error = test()
         print('epoch %d  training loss: %.3f, validation loss: %.3f, test: %.3f' %
               (epoch + 1, train_loss[-1], val_loss[-1], test_error))
-        # if args.use_scheduler:
-        #     scheduler.step()
-        #     if val_loss[-1] < loss_threshold:
-        #         scheduler_loss.step(val_loss[-1])
 
-        if (epoch + 1) % 50 == 0:
-            plt.figure(1)
-            plt.plot(train_loss, 'r', label='Train loss')
-            plt.plot(val_loss, 'g', label='Val loss')
-            plt.legend()
-            plt.show()
+        # if (epoch + 1) % 50 == 0:
+        #     plt.figure(1)
+        #     plt.plot(train_loss, 'r', label='Train loss')
+        #     plt.plot(val_loss, 'g', label='Val loss')
+        #     plt.legend()
+        #     plt.show()
         if args.use_scheduler:
             scheduler.step()
 
@@ -185,7 +181,7 @@ def train():
 def test():
     # print(args.model_path)
     # print(model_name)
-    model.load_state_dict(torch.load(os.path.join(args.model_path, model_name)))
+    # model.load_state_dict(torch.load(os.path.join(args.model_path, model_name)))
     model.eval()
     # print(model)
     accum_loss = 0

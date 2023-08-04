@@ -1,6 +1,26 @@
 import torch
 import torch.nn as nn
-from torch_geometric.nn.dense import dense_diff_pool
+import numpy as np
+from torch_geometric.nn.dense import dense_diff_pool, mincut_pool
+
+
+def cal_spatial_adj(I_link, J_link, n_nodes):
+    A = np.zeros([n_nodes, n_nodes])
+    for i in range(len(I_link)):
+        A[I_link[i], J_link[i]] = 1
+        A[J_link[i], I_link[i]] = 1
+    for j in range(n_nodes):
+        A[j, j] = 1
+    return A
+
+
+def cal_temporal_adj(frames):
+    A = np.zeros([frames, frames])
+    for i in range(frames - 1):
+        A[i, i + 1] = 1
+        A[i + 1, i] = 1
+        A[i, i] = 1
+    return A
 
 
 class GCNLayer(nn.Module):
@@ -24,16 +44,28 @@ class GCNLayer(nn.Module):
         if self.bias is not None:
             self.bias.data.fill_(0.0)
 
-    def forward(self, x, adj, mask= None):
+    def forward(self, x, adj, mask=None):
         B, N, C = adj.size()
         out = self.lin(x).detach()
+
+        if mask is not None:
+            adj = adj * mask.view(B, N, N).to(x.dtype)
+        # else:
+        #     if N == 22:
+        #         I22_link = np.array([8, 0, 1, 2, 8, 4, 5, 6, 8, 9, 10, 9, 12, 13, 14, 14, 9, 17, 18, 19, 19])
+        #         J22_link = np.array([0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21])
+        #         mask = cal_spatial_adj(I22_link, J22_link, N)
+        #         mask = torch.from_numpy(mask).to('cuda:0')
+        #         adj = adj * mask.unsqueeze(0).to(x.dtype)
+        #     elif N == 10:
+        #         mask = cal_temporal_adj(N)
+        #         mask = torch.from_numpy(mask).to('cuda:0')
+        #         adj = adj * mask.unsqueeze(0).to(x.dtype)
+
         out = torch.matmul(adj, out)
 
         if self.bias is not None:
             out = out + self.bias
-        if mask is not None:
-            out = out * mask.view(B, N, 1).to(x.dtype)
-
         return out
 
 
@@ -102,10 +134,10 @@ class DiffPoolingLayer(nn.Module):
         # for i in range(H):
             # S[:, i, :, :] = self.GNN_Pool(src[:, i, :, :], adj[:, i, :, :], mask)
         # todo: 要不要除一个系数
-        # S = self.softmax(S)  # B, H, N, num_cluster
+        S = self.softmax(S)  # B, H, N, num_cluster
         # print(S)
         # S = nn.functional.gumbel_softmax(S, tau=0.1)
-        S = nn.functional.gumbel_softmax(S, tau=0.1, hard=True)
+        # S = nn.functional.gumbel_softmax(S, tau=0.1, hard=True)
 
         S_degree = (torch.sum(S, dim=1)+0.0001).unsqueeze(1).repeat(1, N, 1)  # B, H, N, num_cluster
         # todo: src embed->return?

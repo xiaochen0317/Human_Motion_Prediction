@@ -2,500 +2,33 @@ import torch
 import torch.nn as nn
 import math
 import numpy as np
-from utils.Transformer_Layer import Encoder_Layer
-import torch.functional as F
-
-class GraphAttentionLayer(nn.Module):
-    def __init__(self, in_features, out_features):
-        super(GraphAttentionLayer, self).__init__()
-        self.linear = nn.Linear(in_features, out_features)
-        self.attention = nn.Linear(2*out_features, 1)
-
-    def forward(self, x, adj):
-        h = self.linear(x)
-        a = self.attention(torch.cat([h.repeat(1, adj.size(1)).view(h.size(0), -1, h.size(1)), h.unsqueeze(1).repeat(1, adj.size(1), 1)], dim=-1))
-        e = F.softmax(a, dim=1)
-        output = torch.matmul(e.transpose(1, 2), h)
-        return output.squeeze(1)
-
-
-class GraphAttentionNetwork(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size, num_layers):
-        super(GraphAttentionNetwork, self).__init__()
-        self.num_layers = num_layers
-        self.gat_layers = nn.ModuleList()
-        self.gat_layers.append(GraphAttentionLayer(input_size, hidden_size))
-        for _ in range(num_layers-2):
-            self.gat_layers.append(GraphAttentionLayer(hidden_size, hidden_size))
-        self.rnn = nn.GRU(hidden_size, hidden_size, batch_first=True)
-        self.output_layer = nn.Linear(hidden_size, output_size)
-
-    def forward(self, x, adj):
-        for i in range(self.num_layers-1):
-            x = F.elu(self.gat_layers[i](x, adj))
-        output, _ = self.rnn(x)
-        output = self.output_layer(output)
-        return output
-
-
-
-class ConvTemporalGraphical(nn.Module):
-    # Source : https://github.com/yysijie/st-gcn/blob/master/net/st_gcn.*
-    r"""The basic module for applying a graph convolution.
-    Args:
-        in_channels (int): Number of channels in the input sequence data
-        out_channels (int): Number of channels produced by the convolution
-        kernel_size (int): Size of the graph convolving kernel
-        t_kernel_size (int): Size of the temporal convolving kernel
-        t_stride (int, optional): Stride of the temporal convolution. Default: 1
-        t_padding (int, optional): Temporal zero-padding added to both sides of
-            the input. Default: 0
-        t_dilation (int, optional): Spacing between temporal kernel elements.
-            Default: 1
-        bias (bool, optional): If ``True``, adds a learnable bias to the output.
-            Default: ``True``
-    Shape:
-        - Input: Input graph sequence in :math:`(N, in_channels, T_{in}, V)` format
-        - Output: Outpu graph sequence in :math:`(N, out_channels, T_{out}, V)` format
-        where
-            :math:`N` is a batch size,
-            :math:`K` is the spatial kernel size, as :math:`K == kernel_size[1]`,
-            :math:`T_{in}/T_{out}` is a length of input/output sequence,
-            :math:`V` is the number of graph nodes. 
-    """
-
-    def __init__(self,
-                 time_dim,
-                 joints_dim,
-                 d_model,
-                 dims,
-                 key
-                 ):
-        super(ConvTemporalGraphical, self).__init__()
-        self.SAB = SAB(joints_dim, time_dim, d_model, dims, key)  # J, T, T
-        self.TAB = TAB(time_dim, time_dim, d_model, dims, key)  # T, J, J
-        self.A = nn.Parameter(torch.FloatTensor(time_dim, joints_dim,
-           joints_dim))  # learnable, graph-agnostic 3-d adjacency matrix(or edge importance matrix)
-        stdv = 1. / math.sqrt(self.A.size(1))
-        self.A.data.uniform_(-stdv, stdv)
-
-        self.T = nn.Parameter(torch.FloatTensor(joints_dim, time_dim, time_dim))
-        stdv = 1. / math.sqrt(self.T.size(1))
-        self.T.data.uniform_(-stdv, stdv)
-        '''
-        self.prelu = nn.PReLU()
-        
-        self.Z=nn.Parameter(torch.FloatTensor(joints_dim, joints_dim, time_dim, time_dim)) 
-        stdv = 1. / math.sqrt(self.Z.size(2))
-        self.Z.data.uniform_(-stdv,stdv)
-        '''
-
-    def forward(self, x):
-        # x = torch.einsum('nctv,vtq->ncqv', (x, self.T))
-        # # x=self.prelu(x)
-        # x = torch.einsum('nctv,tvw->nctw', (x, self.A))
-        # x = torch.einsum('nctv,wvtq->ncqw', (x, self.Z))
-        A = self.SAB(x)
-        T = self.TAB(x)
-        x = torch.einsum('nctv,vntq->ncqv', (x, T))  # B 3 T J | J T T  B 3 T J
-        x = torch.einsum('nctv,tnvw->nctw', (x, A))  # B 3 T J | T J J  B 3 T J
-        return x.contiguous()
-
-
-
-
-class ConvTemporalGraphical2(nn.Module):
-    # Source : https://github.com/yysijie/st-gcn/blob/master/net/st_gcn.*
-    r"""The basic module for applying a graph convolution.
-    Args:
-        in_channels (int): Number of channels in the input sequence data
-        out_channels (int): Number of channels produced by the convolution
-        kernel_size (int): Size of the graph convolving kernel
-        t_kernel_size (int): Size of the temporal convolving kernel
-        t_stride (int, optional): Stride of the temporal convolution. Default: 1
-        t_padding (int, optional): Temporal zero-padding added to both sides of
-            the input. Default: 0
-        t_dilation (int, optional): Spacing between temporal kernel elements.
-            Default: 1
-        bias (bool, optional): If ``True``, adds a learnable bias to the output.
-            Default: ``True``
-    Shape:
-        - Input: Input graph sequence in :math:`(N, in_channels, T_{in}, V)` format
-        - Output: Outpu graph sequence in :math:`(N, out_channels, T_{out}, V)` format
-        where
-            :math:`N` is a batch size,
-            :math:`K` is the spatial kernel size, as :math:`K == kernel_size[1]`,
-            :math:`T_{in}/T_{out}` is a length of input/output sequence,
-            :math:`V` is the number of graph nodes. 
-    """
-
-    def __init__(self,
-                 time_dim,
-                 joints_dim,
-                 d_model,
-                 dims,
-                 key
-                 ):
-        super(ConvTemporalGraphical, self).__init__()
-        self.SAB = SAB(joints_dim, time_dim, d_model, dims, key)  # J, T, T
-        self.TAB = TAB(time_dim, time_dim, d_model, dims, key)  # T, J, J
-        self.A = nn.Parameter(torch.FloatTensor(time_dim, joints_dim,
-           joints_dim))  # learnable, graph-agnostic 3-d adjacency matrix(or edge importance matrix)
-        stdv = 1. / math.sqrt(self.A.size(1))
-        self.A.data.uniform_(-stdv, stdv)
-
-        self.T = nn.Parameter(torch.FloatTensor(joints_dim, time_dim, time_dim))
-        stdv = 1. / math.sqrt(self.T.size(1))
-        self.T.data.uniform_(-stdv, stdv)
-        '''
-        self.prelu = nn.PReLU()
-        
-        self.Z=nn.Parameter(torch.FloatTensor(joints_dim, joints_dim, time_dim, time_dim)) 
-        stdv = 1. / math.sqrt(self.Z.size(2))
-        self.Z.data.uniform_(-stdv,stdv)
-        '''
-
-    def forward(self, x):
-        # x = torch.einsum('nctv,vtq->ncqv', (x, self.T))
-        # # x=self.prelu(x)
-        # x = torch.einsum('nctv,tvw->nctw', (x, self.A))
-        # x = torch.einsum('nctv,wvtq->ncqw', (x, self.Z))
-        A = self.SAB(x)
-        T = self.TAB(x)
-        x = torch.einsum('nctv,vntq->ncqv', (x, T))  # B 3 T J | J T T  B 3 T J
-        x = torch.einsum('nctv,tnvw->nctw', (x, A))  # B 3 T J | T J J  B 3 T J
-        return x.contiguous()
-
-
-
-class ST_GCNN_layer(nn.Module):
-    """
-    Shape:
-        - Input[0]: Input graph sequence in :math:`(N, in_channels, T_{in}, V)` format
-        - Input[1]: Input graph adjacency matrix in :math:`(K, V, V)` format
-        - Output[0]: Outpu graph sequence in :math:`(N, out_channels, T_{out}, V)` format
-        where
-            :math:`N` is a batch size,
-            :math:`K` is the spatial kernel size, as :math:`K == kernel_size[1]`,
-            :math:`T_{in}/T_{out}` is a length of input/output sequence,
-            :math:`V` is the number of graph nodes. 
-            :in_channels= dimension of coordinates
-            : out_channels=dimension of coordinates
-            +
-    """
-
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 kernel_size,
-                 stride,
-                 time_dim,
-                 joints_dim,
-                 dropout,
-                 d_model,
-                 dim,
-                 key,
-                 bias=True):
-
-        super(ST_GCNN_layer, self).__init__()
-        self.kernel_size = kernel_size
-        assert self.kernel_size[0] % 2 == 1
-        assert self.kernel_size[1] % 2 == 1
-        padding = ((self.kernel_size[0] - 1) // 2, (self.kernel_size[1] - 1) // 2)
-
-        self.gcn = ConvTemporalGraphical(time_dim, joints_dim, d_model, dim, key)  # the convolution layer
-
-        self.tcn = nn.Sequential(
-            nn.Conv2d(
-                in_channels,
-                out_channels,
-                (self.kernel_size[0], self.kernel_size[1]),
-                (stride, stride),
-                padding,
-            ),
-            nn.BatchNorm2d(out_channels),
-            nn.Dropout(dropout, inplace=True),
-        )
-
-        if stride != 1 or in_channels != out_channels:
-
-            self.residual = nn.Sequential(nn.Conv2d(
-                in_channels,
-                out_channels,
-                kernel_size=1,
-                stride=(1, 1)),
-                nn.BatchNorm2d(out_channels),
-            )
-
-        else:
-            self.residual = nn.Identity()
-
-        self.prelu = nn.PReLU()
-
-    def forward(self, x):
-        #   assert A.shape[0] == self.kernel_size[1], print(A.shape[0],self.kernel_size)
-        res = self.residual(x)
-        x = self.gcn(x)
-        x = self.tcn(x)
-        x = x + res
-        x = self.prelu(x)
-        return x
-
-
-class CNN_layer(
-    nn.Module):  # This is the simple CNN layer,that performs a 2-D convolution while maintaining the dimensions of the input(except for the features dimension)
-
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 kernel_size,
-                 dropout,
-                 bias=True):
-        super(CNN_layer, self).__init__()
-        self.kernel_size = kernel_size
-        padding = (
-            (kernel_size[0] - 1) // 2, (kernel_size[1] - 1) // 2)  # padding so that both dimensions are maintained
-        assert kernel_size[0] % 2 == 1 and kernel_size[1] % 2 == 1
-
-        self.block = [nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
-            , nn.BatchNorm2d(out_channels), nn.Dropout(dropout, inplace=True)]
-
-        self.block = nn.Sequential(*self.block)
-
-    def forward(self, x):
-        output = self.block(x)
-        return output
-
-
-# In[11]:
-
-
-class Model(nn.Module):
-    """ 
-    Shape:
-        - Input[0]: Input sequence in :math:`(N, in_channels,T_in, V)` format
-        - Output[0]: Output sequence in :math:`(N,T_out,in_channels, V)` format
-        where
-            :math:`N` is a batch size,
-            :math:`T_{in}/T_{out}` is a length of input/output sequence,
-            :math:`V` is the number of graph nodes. 
-            :in_channels=number of channels for the coordiantes(default=3)
-            +
-    """
-
-    def __init__(self,
-                 input_channels,
-                 input_time_frame,
-                 output_time_frame,
-                 st_gcnn_dropout,
-                 joints_to_consider,
-                 n_txcnn_layers,
-                 txc_kernel_size,
-                 txc_dropout,
-                 d_model,
-                 dim,
-                 bias=True):
-
-        super(Model, self).__init__()
-        self.input_time_frame = input_time_frame
-        self.output_time_frame = output_time_frame
-        self.joints_to_consider = joints_to_consider
-        self.st_gcnns = nn.ModuleList()
-        self.n_txcnn_layers = n_txcnn_layers
-        self.txcnns = nn.ModuleList()
-
-        self.st_gcnns.append(ST_GCNN_layer(input_channels, 32, [1, 1], 1, input_time_frame,
-                                           joints_to_consider, st_gcnn_dropout, d_model, dim, 0))
-        self.st_gcnns.append(ST_GCNN_layer(32, 64, [1, 1], 1, input_time_frame,
-                                           joints_to_consider, st_gcnn_dropout, d_model, dim, 1))
-        self.st_gcnns.append(ST_GCNN_layer(64, 32, [1, 1], 1, input_time_frame,
-                                           joints_to_consider, st_gcnn_dropout, d_model, dim, 2))
-        self.st_gcnns.append(ST_GCNN_layer(32, input_channels, [1, 1], 1, input_time_frame,
-                                           joints_to_consider, st_gcnn_dropout, d_model, dim, 3))
-
-        # at this point, we must permute the dimensions of the gcn network, from (N,C,T,V) into (N,T,C,V)
-        self.txcnns.append(CNN_layer(input_time_frame, output_time_frame, txc_kernel_size,
-                                     txc_dropout))  # with kernel_size[3,3] the dimensinons of C,V will be maintained
-        for i in range(1, n_txcnn_layers):
-            self.txcnns.append(CNN_layer(output_time_frame, output_time_frame, txc_kernel_size, txc_dropout))
-
-        self.prelus = nn.ModuleList()
-        for j in range(n_txcnn_layers):
-            self.prelus.append(nn.PReLU())
-
-    def forward(self, x):
-        for gcn in (self.st_gcnns):
-            x = gcn(x)
-
-        x = x.permute(0, 2, 1, 3)  # prepare the input for the Time-Extrapolator-CNN (NCTV->NTCV)
-
-        x = self.prelus[0](self.txcnns[0](x))
-
-        for i in range(1, self.n_txcnn_layers):
-            x = self.prelus[i](self.txcnns[i](x)) + x  # residual connection
-
-        return x
-
-
-class Scaled_Dot_Product_Attention(nn.Module):
-    def __init__(self, factor, attn_dropout=0.1):
-        super(Scaled_Dot_Product_Attention, self).__init__()
-        self.factor = factor
-        self.dropout = nn.Dropout(attn_dropout)
-        self.softmax = nn.Softmax(dim=-1)
-
-    def forward(self, q, k, v, mask=None):
-        attn = torch.matmul(q / self.factor, k.transpose(2, 3))
-        if mask is not None:
-            attn = attn.masked_fill(mask == 0, -1e9)
-        attn = self.dropout(self.softmax(attn))
-        output = torch.matmul(attn, v)
-        return output, attn
-
-
-class self_attention(nn.Module):
-    def __init__(self, factor, attn_dropout=0.1):
-        super(self_attention, self).__init__()
-        self.factor = factor
-        self.dropout = nn.Dropout(attn_dropout)
-        self.softmax = nn.Softmax(dim=-1)
-
-    def forward(self, q, k, mask=None):
-        attn = torch.matmul(q / self.factor, k.transpose(2, 3))
-        if mask is not None:
-            attn = attn.masked_fill(mask == 0, -1e9)
-        attn = self.dropout(self.softmax(attn))
-        return attn
-
-
-class multi_head_attention(nn.Module):
-    def __init__(self, n_head, d_model, d_k, attn_dropout=0.1):
-        super(multi_head_attention, self).__init__()
-        self.n_head = n_head
-        self.d_model = d_model
-        self.d_k = d_k
-        self.attn_dropout = attn_dropout
-        self.W_Q = nn.Linear(d_model, n_head * d_k, bias=False)
-        self.W_K = nn.Linear(d_model, n_head * d_k, bias=False)
-        self.attention = self_attention(factor=d_k ** 0.5, attn_dropout=self.attn_dropout)
-
-    def forward(self, q, k, mask=None):
-        d_k, n_head = self.d_k, self.n_head
-        sz_b, len_q, len_k = q.size(0), q.size(1), k.size(1)
-        q = self.W_Q(q).view(sz_b, len_q, n_head, d_k)
-        k = self.W_K(k).view(sz_b, len_k, n_head, d_k)
-        q, k = q.transpose(1, 2), k.transpose(1, 2)
-        if mask is not None:
-            mask = mask.unqueeze(1)
-        attn = self.attention(q, k, mask=mask)
-        return attn
-
-
-class Multi_Head_Attention(nn.Module):
-    def __init__(self, n_head, d_model, d_k, d_v, dropout=0.1):
-        super(Multi_Head_Attention, self).__init__()
-        self.n_head = n_head
-        self.d_k = d_k
-        self.d_v = d_v
-        self.W_Q = nn.Linear(d_model, n_head * d_k, bias=False)
-        self.W_K = nn.Linear(d_model, n_head * d_k, bias=False)
-        self.W_V = nn.Linear(d_model, n_head * d_v, bias=False)
-        self.FC = nn.Linear(n_head * d_v, d_model, bias=False)
-        self.attention = Scaled_Dot_Product_Attention(factor=d_k ** 0.5)
-        self.dropout = nn.Dropout(dropout)
-        self.LN = nn.LayerNorm(d_model, eps=1e-6)
-
-    def forward(self, q, k, v, mask=None):
-        d_k, d_v, n_head = self.d_k, self.d_v, self.n_head
-        sz_b, len_q, len_k, len_v = q.size(0), q.size(1), k.size(1), v.size(1)
-        residual = q
-        # print(self.W_Q(q).size())
-        q = self.W_Q(q).view(sz_b, len_q, n_head, d_k)
-        k = self.W_K(k).view(sz_b, len_k, n_head, d_k)
-        v = self.W_V(v).view(sz_b, len_v, n_head, d_v)
-        q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
-        if mask is not None:
-            mask = mask.unqueeze(1)
-        q, attn = self.attention(q, k, v, mask=mask)
-        # attn: sz_b, n_head, len_q, len_k (len_k = len_v)
-        # q: sz_b, n_head, len_q, d_v
-        q = q.transpose(1, 2).contiguous().view(sz_b, len_q, -1)
-        q = self.dropout(self.FC(q))
-        q += residual
-        q = self.LN(q)
-        return q, attn
-
-
-class Position_wise_Feed_Forward(nn.Module):
-    def __init__(self, d_in, d_hid, dropout=0.1):
-        super(Position_wise_Feed_Forward, self).__init__()
-        self.W_1 = nn.Linear(d_in, d_hid)
-        self.W_2 = nn.Linear(d_hid, d_in)
-        self.LN = nn.LayerNorm(d_in, eps=1e-6)
-        self.ReLU = nn.ReLU()
-        self.Dropout = nn.Dropout(dropout)
-
-    def forward(self, x):
-        residual = x
-        x = self.W_2(self.ReLU(self.W_1(x)))
-        x = self.Dropout(x)
-        x += residual
-        x = self.LN(x)
-        return x
-
-
-class Encoder_Layer(nn.Module):
-    def __init__(self, d_model, d_inner, n_head, d_k, d_v, dropout=0.1):
-        super(Encoder_Layer, self).__init__()
-        self.Self_Attention = Multi_Head_Attention(n_head, d_model, d_k, d_v, dropout=dropout)
-        self.Pos_FFN = Position_wise_Feed_Forward(d_model, d_inner, dropout=dropout)
-
-    def forward(self, encoder_input, self_attn_mask=None):
-        encoder_output, encoder_self_attn = self.Self_Attention(encoder_input, encoder_input, encoder_input,
-                                                                mask=self_attn_mask)
-        encoder_output = self.Pos_FFN(encoder_output)
-        # return encoder_output, encoder_self_attn
-        return encoder_output, encoder_self_attn
-
-
-class Decoder_Layer(nn.Module):
-    def __init__(self, d_model, d_inner, n_head, d_k, d_v, dropout=0.1):
-        super(Decoder_Layer, self).__init__()
-        self.Self_Attn = Multi_Head_Attention(n_head, d_model, d_k, d_v, dropout=dropout)
-        self.Enc_Attn = Multi_Head_Attention(n_head, d_model, d_k, d_v, dropout=dropout)
-        self.Pos_FFN = Position_wise_Feed_Forward(d_model, d_inner, dropout=dropout)
-
-    def forward(self, decoder_input, encoder_output, self_attn_mask=None, decoder_attn_mask=None):
-        decoder_output, decoder_attn = self.Self_Attn(decoder_input, encoder_output, encoder_output,
-                                                      mask=decoder_attn_mask)
-        # decoder_output, decoder_attn2 = self.Enc_Attn(decoder_output, decoder_output, decoder_output,
-        # mask=self_attn_mask)
-        decoder_output = self.Pos_FFN(decoder_output)
-        return decoder_output, None, decoder_attn
-        # return decoder_output, decoder_attn2, decoder_attn
-
-
-def get_pad_mask(seq, pad_idx):
-    # todo  为什么unsqueeze？维度？
-    return (seq != pad_idx).unsqueeze(-2)
+import torch.nn.functional as F
+from torch.nn.utils import weight_norm
+import matplotlib.pyplot as plt
+from fixed_adj import spatial_fixed_adj, temporal_fixed_adj
+from utils.partition import DiffPoolingLayer
+import seaborn
+from utils.Transformer_Layer import Decoder_Layer
+from relative_position import cal_ST_SPD
+
+
+def get_sinusoid_encoding_table(n_position, d_hid):
+    def get_position_angle_vec(position):
+        return [position / np.power(10000, 2 * (hid_j // 2) / d_hid) for hid_j in range(d_hid)]
+
+    sinusoid_table = np.array([get_position_angle_vec(pos_i) for pos_i in range(n_position)])
+    sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])
+    sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])
+    return torch.FloatTensor(sinusoid_table).unsqueeze(0)  # 1, T, d_hid
 
 
 class Temporal_Positional_Encoding(nn.Module):
     def __init__(self, d_hid, n_position=200):
         super(Temporal_Positional_Encoding, self).__init__()
-        self.register_buffer('pos_table', self._get_sinusoid_encoding_table(n_position, d_hid))
+        self.register_buffer('pos_table', get_sinusoid_encoding_table(n_position, d_hid))
 
-    def _get_sinusoid_encoding_table(self, n_position, d_hid):
-        def get_position_angle_vec(position):
-            return [position / np.power(10000, 2 * (hid_j // 2) / d_hid) for hid_j in range(d_hid)]
-
-        sinusoid_table = np.array([get_position_angle_vec(pos_i) for pos_i in range(n_position)])
-        sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])
-        sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])
-        return torch.FloatTensor(sinusoid_table).unsqueeze(0)  # [B, T, d_model]
-
-    def forward(self, x):
-        p = self.pos_table[:, :x.size(1)].clone().detach()  # B, T, d_model
+    def forward(self, x):  # B, 3, T， J
+        p = self.pos_table[:, :x.size(1)] * 1000
         return x + p
 
 
@@ -504,99 +37,546 @@ class Spatial_Positional_Encoding(nn.Module):
         super(Spatial_Positional_Encoding, self).__init__()
         self.d_hid = d_hid
 
-    def forward(self, x):  # T, B, J, 3
-        bs, joints = x.size(0), x.size(1)
-        p = torch.zeros([bs, joints, self.d_hid]).to('cuda:0')
-
-        for j in range(bs):
-            central_point = x[j, 0, :]
-            for k in range(joints):
-                p[j, k, :] = x[j, k, :] - central_point
-        # torch.exp()
-        # p = p.data().detach()  # B, T, d_model
+    def forward(self, x):  # B, J, 3
+        bs, joints, feat_dim = x.size()
+        temp = x[:, 8, :]
+        temp = temp.unsqueeze(1).repeat(1, joints, 1)
+        c = (torch.norm(x / 1000 - temp / 1000, dim=-1))
+        p = torch.exp(-c).unsqueeze(2)
         return x + p
 
 
-class SAB(nn.Module):
-    def __init__(self, joints, time, d_model, dims, key):
-        super(SAB, self).__init__()
-        self.atom_encoder = nn.Linear(dims[key], d_model)
-        self.model = Spatial_Graphormer(n_heads=8, d_hid=d_model, dropout=0.1, input_dropout=0.1,
-                                        joints=joints, time=time)
-        self.out_FFN = nn.Linear(d_model, joints)
+class Mix_Coefficient(nn.Module):
+    def __init__(self, dim, channel, scales):
+        super(Mix_Coefficient, self).__init__()
+        self.linear1 = nn.Linear(channel, 1, bias=True)
+        self.relu = nn.ReLU()
+        self.linear2 = nn.Linear(dim, scales, bias=True)
+        self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, src, mask=None):
-        x = src.clone()  # B, 3, J, T
-        x = x.permute(2, 0, 3, 1)  # B, 3, T, J  -> T, B, J, 3
-
-        x = self.atom_encoder(x)
-        t_len, bs, s_len, d_hid = x.size()
-        x = x.view(-1, s_len, d_hid)  # T, B, J, 3 -> T, B,
-        # J, d_model
-        adj = self.model.forward(x, spatial_mask=mask)
-        adj = adj.view(t_len, bs, s_len, s_len)
-        return adj
+    def forward(self, src):
+        src = self.relu(self.linear1(src).squeeze(-1))
+        src = self.linear2(src)
+        # src = self.softmax(src)
+        return src
 
 
-class TAB(nn.Module):
-    def __init__(self, joints, time, d_model, dims, key):
-        super(TAB, self).__init__()
-        self.atom_encoder = nn.Linear(dims[key], d_model)
-        self.model = Temporal_Graphormer(n_heads=8, d_hid=d_model, dropout=0.1, input_dropout=0.1,
-                                         joints=joints, time=time)
-        self.out_FFN = nn.Linear(d_model, time)
+class spatial_edge_enhanced_attention(nn.Module):
+    def __init__(self, in_features, hidden_features, joints):
+        super(spatial_edge_enhanced_attention, self).__init__()
+        self.in_features = in_features  # C
+        self.hidden_features = hidden_features  # C'
+        self.joints = joints  # J
 
-    def forward(self, src, mask=None):
-        x = src.clone()
-        x = x.permute(3, 0, 2, 1)  # B, 3, T, J -> J, B, T, 3
-        x = self.atom_encoder(x)  # J, B, T, 3 -> J, B, T, d_model -> J*B, T, d_model
-        s_len, bs, t_len, d_hid = x.size()
-        x = x.view(-1, t_len, d_hid)
-        # adj = None
-        adj = self.model.forward(x, temporal_mask=mask)
-        adj = adj.view(s_len, bs, t_len, t_len)
-        return adj
+        self.edge_emb_layer = nn.Linear(in_features, hidden_features, bias=True)
+        self.edgefeat_linear1 = nn.Linear(in_features, hidden_features // 2, bias=False)
+        self.prelu = nn.PReLU()
+        self.edgefeat_linear2 = nn.Linear(hidden_features // 2, 1, bias=False)
 
-
-class Temporal_Graphormer(nn.Module):
-    def __init__(self, n_heads, d_hid, dropout, input_dropout, joints, time):
-        super(Temporal_Graphormer, self).__init__()
-        self.n_heads = n_heads
-        self.d_hid = d_hid
-        self.joints = joints
-        self.time = time
-        # self.apply(lambda module: init_parameters(module, n_layers=n_layers))
-        # self.atom_encoder = nn.Embedding(64, d_hid, padding_idx=0)
-
-        self.input_dropout = nn.Dropout(input_dropout)
-        self.position_encoding = Temporal_Positional_Encoding(d_hid=d_hid)
-        self.attn = multi_head_attention(n_head=n_heads, d_model=d_hid, d_k=d_hid // n_heads, attn_dropout=dropout)
-
-    def forward(self, batched_data, temporal_mask=None):
-        # batched_data: [batch_size, T, d_hid]
-        x = batched_data.clone()
-        # output = self.input_dropout(self.position_encoding(x))
-        attn = self.attn(x, x)
-        attn = torch.mean(attn, dim=1)
-        return attn
+    def forward(self, src, s_SPD, device='cuda:0'):  # src: B*T, J, C  s_SPD:List[J, J]
+        B, N, C = src.size()
+        edge_SPD_feat = torch.zeros([B, N, N, C]).to(device)
+        for i in range(self.joints):
+            for j in range(self.joints):
+                SPD = s_SPD[i][j]
+                # print('%d, %d'%(i,j))
+                bone_num = len(SPD) - 1
+                for k in range(bone_num):
+                    head = SPD[k]
+                    end = SPD[k]
+                    edge = src[:, end, :] - src[:, head, :]  # bone_vector: B, C
+                    # edge = self.edge_emb_layer(edge)  # bone_vector: B, C'
+                    edge_SPD_feat[:, i, j, :] += edge
+        edge_attn = self.edgefeat_linear2(self.prelu(self.edgefeat_linear1(edge_SPD_feat)))
+        return edge_attn
 
 
-class Spatial_Graphormer(nn.Module):
-    def __init__(self, n_heads, d_hid, dropout, input_dropout, joints, time):
-        super(Spatial_Graphormer, self).__init__()
-        self.n_heads = n_heads
-        self.d_hid = d_hid
-        self.joints = joints
-        self.time = time
-        # self.apply(lambda module: init_parameters(module, n_layers=n_layers))
-        self.position_encoding = Spatial_Positional_Encoding(d_hid=d_hid)
-        # self.atom_encoder = nn.Embedding(64, d_hid, padding_idx=0)
+class temporal_edge_enhanced_attention(nn.Module):
+    def __init__(self, in_features, hidden_features, frames):
+        super(temporal_edge_enhanced_attention, self).__init__()
+        self.in_features = in_features
+        self.hidden_features = hidden_features
+        self.frames = frames
 
-        self.input_dropout = nn.Dropout(input_dropout)
-        self.attn = multi_head_attention(n_head=n_heads, d_model=d_hid, d_k=d_hid // n_heads, attn_dropout=dropout)
+        self.edge_emb_layer = nn.Linear(in_features, hidden_features, bias=True)
+        self.edgefeat_linear1 = nn.Linear(in_features, hidden_features // 2, bias=False)
+        self.prelu = nn.PReLU()
+        self.edgefeat_linear2 = nn.Linear(hidden_features // 2, 1, bias=False)
 
-    def forward(self, batched_data, spatial_mask=None):
-        x = batched_data.clone()
-        attn = self.attn(x, x)
-        attn = torch.mean(attn, dim=1)
-        return attn
+    def forward(self, src, t_SPD, device='cuda:0'):
+        B, N, C = src.size()
+        edge_SPD_feat = torch.zeros([B, N, N, C]).to(device)
+        for i in range(self.frames):
+            for j in range(self.frames):
+                SPD = t_SPD[i][j]
+                bone_num = len(SPD) - 1
+                for k in range(bone_num):
+                    head = SPD[k]
+                    end = SPD[k]
+                    edge = src[:, end, :] - src[:, head, :]  # bone_vector: B, C
+                    # edge = self.edge_emb_layer(edge)  # bone_vector: B, C'
+                    edge_SPD_feat[:, i, j, :] += edge
+        edge_attn = self.edgefeat_linear2(self.prelu(self.edgefeat_linear1(edge_SPD_feat)))
+        return edge_attn
+
+
+# class DMS_STAttention(nn.Module):
+#     def __init__(self, in_features, out_features, hidden_features, spatial_scales, temporal_scales):
+#         super(DMS_STAttention, self).__init__()
+#         self.spatial_scales = spatial_scales
+#         self.temporal_scales = temporal_scales
+#         self.in_features = in_features
+#         self.hidden_features = hidden_features
+#         self.out_features = out_features
+#         self.spatial_gat = nn.ModuleList()
+#         self.spatial_pool = nn.ModuleList()
+#         self.temporal_gat = nn.ModuleList()
+#         self.temporal_pool = nn.ModuleList()
+#
+#         self.s_coef = Mix_Coefficient(spatial_scales[0], in_features, len(spatial_scales))
+#         self.t_coef = Mix_Coefficient(temporal_scales[0], in_features, len(temporal_scales))
+#
+#         self.sa_bias = nn.Parameter(torch.FloatTensor(10, 22, 22))
+#         nn.init.xavier_uniform_(self.sa_bias, gain=1.414)
+#         self.ta_bias = nn.Parameter(torch.FloatTensor(22, 10, 10))
+#         nn.init.xavier_uniform_(self.ta_bias, gain=1.414)
+#         self.softmax = nn.Softmax(dim=-1)
+#
+#         # self.spatial_left = []
+#         # self.spatial_right = []
+#         # self.temporal_left = []
+#         # self.temporal_right = []
+#
+#         for i in range(len(spatial_scales)):
+#             self.spatial_gat.append(AttentionLayer(in_features, hidden_features))
+#             if i < len(spatial_scales) - 1:
+#                 self.spatial_pool.append(
+#                     DiffPoolingLayer(self.in_features, 32, self.spatial_scales[i + 1]))
+#         for i in range(len(temporal_scales)):
+#             self.temporal_gat.append(AttentionLayer(in_features, hidden_features))
+#             if i < len(temporal_scales) - 1:
+#                 self.temporal_pool.append(
+#                     DiffPoolingLayer(self.in_features, 32, self.temporal_scales[i + 1]))
+#
+#         self.dropout = nn.Dropout(0.1)
+#         # self.seea = spatial_edge_enhanced_attention(in_features, hidden_features, spatial_scales[0])
+#         # self.teea = temporal_edge_enhanced_attention(in_features, hidden_features, temporal_scales[0])
+#         self.s_SPD, self.t_SPD = cal_ST_SPD()
+#
+#     def forward(self, src, device='cuda:0'):
+#         B, C, T, J = src.size()
+#         # todo:s作为左右乘的元素？
+#         s_ma1 = []
+#         s_ma2 = []
+#         # Spatial GAT
+#         spatial_input = src.permute(0, 2, 3, 1).reshape(B * T, J, C)
+#         s_coef = self.s_coef(spatial_input)
+#         # s_eea = self.seea(spatial_input, self.s_SPD)
+#         spatial_attention = []
+#         for i in range(len(self.spatial_scales) - 1):
+#             spatial_attention.append(self.spatial_gat[i](spatial_input))  # B*T，J， J
+#             spatial_input, s1 = self.spatial_pool[i](spatial_input, spatial_attention[i])
+#             s_ma1.append(s1)
+#         spatial_attention.append(self.spatial_gat[-1](spatial_input))
+#         coef = s_coef[:, 0].unsqueeze(-1).unsqueeze(-1).repeat(1, self.spatial_scales[0], self.spatial_scales[0])
+#         sa_fusion = spatial_attention[0] * coef
+#         # sa_fusion = spatial_attention[0]
+#         for i in range(1, len(self.spatial_scales)):  # 从1尺度开始计算
+#             # 初始化邻接矩阵列表
+#             A_prev = spatial_attention[i]  # 每个尺度的注意力矩阵
+#             S = s_ma1[0]  # 初始化S为S(0,1)
+#             if i >= 1:  # 如果i大于1，那么需要计算S(0,i)
+#                 for j in range(1, i):  # 对每个池化矩阵进行循环
+#                     # 从尺度i到尺度0，就需要S(0, i) = S(0, 1) * S(1, 2) *...* S(i-1, i)
+#                     S = torch.matmul(S, s_ma1[j])
+#             # 将结果添加到邻接矩阵列表中
+#             A = S @ A_prev @ S.transpose(1, 2)
+#             # S = F.softmax(S, dim=-2)
+#             coef = s_coef[:, i].unsqueeze(-1).unsqueeze(-1).repeat(1, self.spatial_scales[0], self.spatial_scales[0])
+#             sa_fusion += A * coef
+#             # sa_fusion += A
+#         # sa_fusion = sa_fusion / len(self.spatial_scales)
+#         # sa_fusion = torch.where(sa_fusion < 0.75, torch.zeros_like(sa_fusion), sa_fusion)
+#
+#         # Temporal GAT
+#         temporal_input = src.permute(0, 3, 2, 1).reshape(B * J, T, C)
+#         t_coef = self.t_coef(temporal_input)
+#         # t_eea = self.teea(temporal_input, self.t_SPD)
+#         temporal_attention = []
+#         for i in range(len(self.temporal_scales) - 1):
+#             temporal_attention.append(self.temporal_gat[i](temporal_input))
+#             temporal_input, s2 = self.temporal_pool[i](temporal_input, temporal_attention[i])
+#             s_ma2.append(s2)
+#         temporal_attention.append(self.temporal_gat[-1](temporal_input))
+#         ta_fusion = temporal_attention[0] * t_coef[:, 0].unsqueeze(-1).unsqueeze(-1).repeat(1, self.temporal_scales[0],
+#                                                                                             self.temporal_scales[0])
+#         # ta_fusion = temporal_attention[0]
+#         for i in range(1, len(self.temporal_scales)):
+#             A_prev = temporal_attention[i]
+#             S = s_ma2[0]
+#             if i >= 1:
+#                 for j in range(1, i):
+#                     S = torch.matmul(S, s_ma2[j])
+#             S = F.softmax(S, dim=-2)
+#             A = S @ A_prev @ S.transpose(1, 2)
+#             # ta_fusion += A
+#             ta_fusion += A * t_coef[:, 0].unsqueeze(-1).unsqueeze(-1).repeat(1, self.temporal_scales[0],
+#                                                                              self.temporal_scales[0])
+#             # ta_fusion += A
+#             # ta_fusion = ta_fusion / len(self.temporal_scales)
+#         # ta_fusion = torch.where(ta_fusion < 0.75, torch.zeros_like(ta_fusion), ta_fusion)
+#
+#         # sa_fusion += s_eea.squeeze()
+#         # ta_fusion += t_eea.squeeze()
+#         sa_fusion = sa_fusion.reshape(B, T, J, J)
+#         ta_fusion = ta_fusion.reshape(B, J, T, T)
+#         sa_fusion += self.sa_bias.unsqueeze(0).repeat(B, 1, 1, 1)
+#         ta_fusion += self.ta_bias.unsqueeze(0).repeat(B, 1, 1, 1)
+#         sa_fusion = self.softmax(sa_fusion)
+#         ta_fusion = self.softmax(ta_fusion)
+#         sa_fusion = self.dropout(sa_fusion)
+#         ta_fusion = self.dropout(ta_fusion)
+#         return sa_fusion, ta_fusion
+
+
+class DMS_STAttention(nn.Module):
+    def __init__(self, in_features, out_features, hidden_features, spatial_scales, temporal_scales,
+                 attn_dropout=0.1):
+        super(DMS_STAttention, self).__init__()
+        self.spatial_scales = spatial_scales
+        self.temporal_scales = temporal_scales
+        self.in_features = in_features
+        self.hidden_features = hidden_features
+        self.out_features = out_features
+        # self.heads = heads
+
+        self.W = nn.Parameter(torch.FloatTensor(in_features, hidden_features))
+        nn.init.xavier_uniform_(self.W, gain=1.414)
+
+        self.as_src = []
+        self.as_dst = []
+        self.at_src = []
+        self.at_dst = []
+        for i in range(len(spatial_scales)):
+            self.as_src.append(nn.Parameter(torch.FloatTensor(hidden_features, 1)).to('cuda:0'))
+            nn.init.xavier_uniform_(self.as_src[i], gain=1.414)
+            self.as_dst.append(nn.Parameter(torch.FloatTensor(hidden_features, 1)).to('cuda:0'))
+            nn.init.xavier_uniform_(self.as_dst[i], gain=1.414)
+        for j in range(len(temporal_scales)):
+            self.at_src.append(nn.Parameter(torch.FloatTensor(hidden_features, 1)).to('cuda:0'))
+            nn.init.xavier_uniform_(self.at_src[j], gain=1.414)
+            self.at_dst.append(nn.Parameter(torch.FloatTensor(hidden_features, 1)).to('cuda:0'))
+            nn.init.xavier_uniform_(self.at_dst[j], gain=1.414)
+
+        self.leaky_relu = nn.LeakyReLU(0.2)
+        self.softmax = nn.Softmax(dim=-1)
+        self.dropout = nn.Dropout(attn_dropout)
+
+        self.spatial_pool = nn.ModuleList()
+        self.temporal_pool = nn.ModuleList()
+        self.spatial_gat = nn.ModuleList()
+        self.temporal_gat = nn.ModuleList()
+
+        self.s_coef = Mix_Coefficient(spatial_scales[0], in_features, len(spatial_scales))
+        self.t_coef = Mix_Coefficient(temporal_scales[0], in_features, len(temporal_scales))
+
+        for i in range(len(spatial_scales) - 1):
+            self.spatial_pool.append(DiffPoolingLayer(in_features, hidden_features, spatial_scales[i + 1]))
+        for i in range(len(temporal_scales) - 1):
+            self.temporal_pool.append(DiffPoolingLayer(in_features, hidden_features, temporal_scales[i + 1]))
+
+    def forward(self, src):
+        # src: B, T, J, C_in
+        # B, T, J, C_out
+        B, C_in, T, J = src.size()
+        src = src.permute(0, 2, 3, 1)
+        src_emb = torch.matmul(src, self.W)  # B, T, J, C * C_in, C_out -> B, T, J, C_out
+        C_out = src_emb.size()[3]
+        # get spatial/temporal input and MoE coefficient
+        spatial_input = src.reshape(B * T, J, C_in)
+        spatial_input_emb = src_emb.reshape(B * T, J, C_out)
+        temporal_input = src.permute(0, 2, 1, 3).reshape(B * J, T, C_in)
+        temporal_input_emb = src_emb.permute(0, 2, 1, 3).reshape(B * J, T, C_out)
+        # todo:要不要把coef的输入改为不同尺度的输入
+        # spatial_coef = self.s_coef(src.reshape(B * T, J, -1))  # B*T, s_scales
+        # temporal_coef = self.t_coef(src.permute(0, 2, 1, 3).reshape(B * J, T, -1))  # B*J, t_scales
+
+        # set list of spatial/temporal pooling matrix and attention matrix
+        spatial_pooling = []
+        spatial_attention = []
+        temporal_pooling = []
+        temporal_attention = []
+
+        # spatial GAT
+        for i in range(len(self.spatial_scales)):
+            attn_src = torch.matmul(spatial_input_emb, self.as_src[i])  # B*T, J, C_out * C_out, 1 -> B*T, J, 1
+            attn_dst = torch.matmul(spatial_input_emb, self.as_dst[i])  # B*T, J, C_out * C_out, 1 -> B*T, J, 1
+            a = attn_src.expand(-1, -1, self.spatial_scales[i])
+            attn = attn_src.expand(-1, -1, self.spatial_scales[i]) + attn_dst.expand(-1, -1, self.spatial_scales[i]).\
+                permute(0, 2, 1)
+            attn = self.leaky_relu(attn)
+            spatial_attention.append(attn)  # B*T，J， J
+            if i < len(self.spatial_scales) - 1:
+                spatial_input, pooling = self.spatial_pool[i](spatial_input, spatial_attention[i])
+                # B*T, J', C， B*T，J， J‘
+                spatial_pooling.append(pooling)
+
+        # s_coef = spatial_coef[:, 0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1). \
+        #     repeat(1, self.heads, self.spatial_scales[0], self.spatial_scales[0])
+        sa_fusion = spatial_attention[0]
+
+        for i in range(1, len(self.spatial_scales)):
+            A_prev = spatial_attention[i]  # 每个尺度的注意力矩阵
+            S = spatial_pooling[0]  # 初始化S为S(0,1)
+            if i >= 1:  # 如果i大于1，那么需要计算S(0,i)
+                for j in range(1, i):  # 对每个池化矩阵进行循环
+                    S = torch.matmul(S, spatial_pooling[j])
+            A = torch.matmul(torch.matmul(S, A_prev), S.transpose(1, 2))
+            # s_coef = spatial_coef[:, i].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1). \
+            #     repeat(1, self.heads, self.spatial_scales[0], self.spatial_scales[0])
+            sa_fusion += A
+
+        # temporal GAT
+        for i in range(len(self.temporal_scales)):
+            # temporal_input_emb = torch.matmul(temporal_input, self.W)
+            attn_src = torch.matmul(temporal_input_emb, self.at_src[i])  # B*J, H, T, 1
+            attn_dst = torch.matmul(temporal_input_emb, self.at_dst[i])  # B*J, H, T, 1
+            attn = attn_src.expand(-1, -1, self.temporal_scales[i]) + attn_dst.expand(-1, -1, self.temporal_scales[i]).\
+                permute(0, 2, 1)
+            attn = self.leaky_relu(attn)
+            temporal_attention.append(attn)  # B*T，H, J， J
+            if i < len(self.temporal_scales) - 1:
+                temporal_input, pooling = self.temporal_pool[i](temporal_input, temporal_attention[i])
+                temporal_pooling.append(pooling)
+        # t_coef = temporal_coef[:, 0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1). \
+        #     repeat(1, self.heads, self.temporal_scales[0], self.temporal_scales[0])
+        ta_fusion = temporal_attention[0]
+        for i in range(1, len(self.temporal_scales)):
+            A_prev = temporal_attention[i]
+            S = temporal_pooling[0]
+            if i >= 1:
+                for j in range(1, i):
+                    S = torch.matmul(S, temporal_pooling[j])
+            A = torch.matmul(torch.matmul(S, A_prev), S.transpose(2, 3))
+            # t_coef = temporal_coef[:, i].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1). \
+            #     repeat(1, self.heads, self.temporal_scales[0], self.temporal_scales[0])
+            ta_fusion += A
+        sa_fusion = self.softmax(sa_fusion)
+        sa_fusion = self.dropout(sa_fusion)
+        ta_fusion = self.softmax(ta_fusion)
+        ta_fusion = self.dropout(ta_fusion)
+        sa_fusion = sa_fusion.reshape(B, T, J, J)
+        ta_fusion = ta_fusion.reshape(B, J, T, T)
+        # src_emb = src_emb.permute(0, 3, 1, 2)
+        return sa_fusion, ta_fusion
+
+
+class DMS_ST_GAT_layer(nn.Module):
+    def __init__(self, in_features, out_features, hidden_features, kernel_size, stride, heads, spatial_scales,
+                 temporal_scales, attn_dropout=0.1, dropout=0.1):
+        super(DMS_ST_GAT_layer, self).__init__()
+        self.kernel_size = kernel_size
+        assert self.kernel_size[0] % 2 == 1
+        assert self.kernel_size[1] % 2 == 1
+        padding = ((self.kernel_size[0] - 1) // 2, (self.kernel_size[1] - 1) // 2)
+
+        # self.attention = DMS_STAttention(in_features, out_features, hidden_features, heads, spatial_scales,
+        #                                  temporal_scales, attn_dropout)
+        self.attention = DMS_STAttention(in_features, out_features, hidden_features, spatial_scales,
+                                         temporal_scales)
+
+        self.cnn = nn.Sequential(
+            nn.Conv2d(in_features, out_features, (self.kernel_size[0], self.kernel_size[1]), (stride, stride), padding),
+            nn.BatchNorm2d(out_features),
+            nn.Dropout(dropout, inplace=True))
+
+        if stride != 1 or in_features != out_features:
+            self.residual = nn.Sequential(nn.Conv2d(in_features, out_features, kernel_size=1, stride=(1, 1)),
+                                          nn.BatchNorm2d(out_features))
+        else:
+            self.residual = nn.Identity()
+
+        self.prelu = nn.PReLU()
+
+    def forward(self, x):
+        res = self.residual(x)
+        S, T = self.attention(x)
+        # todo:改一下乘法
+        out = torch.einsum('nctv,ntvw->nctw', (x, S))
+        out = torch.einsum('nctv,nvtq->ncqv', (out, T))
+        out = self.cnn(out)  # B, C, T, J
+        out = self.prelu(out)
+        out = out + res
+        return out
+
+
+class Chomp1d(nn.Module):
+    def __init__(self, chomp_size):
+        super(Chomp1d, self).__init__()
+        self.chomp_size = chomp_size
+
+    def forward(self, x):
+        return x[:, :, :-self.chomp_size].contiguous()
+
+
+class TemporalBlock(nn.Module):
+    def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=0.2):
+        super(TemporalBlock, self).__init__()
+        self.conv1 = weight_norm(nn.Conv1d(n_inputs, n_outputs, kernel_size,
+                                           stride=stride, padding=padding, dilation=dilation))
+        self.chomp1 = Chomp1d(padding)
+        self.relu1 = nn.ReLU()
+        self.dropout1 = nn.Dropout(dropout)
+
+        self.conv2 = weight_norm(nn.Conv1d(n_outputs, n_outputs, kernel_size,
+                                           stride=stride, padding=padding, dilation=dilation))
+        self.chomp2 = Chomp1d(padding)
+        self.relu2 = nn.ReLU()
+        self.dropout2 = nn.Dropout(dropout)
+
+        self.net = nn.Sequential(self.conv1, self.chomp1, self.relu1, self.dropout1,
+                                 self.conv2, self.chomp2, self.relu2, self.dropout2)
+        self.downsample = nn.Conv1d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
+        self.relu = nn.ReLU()
+        self.init_weights()
+
+    def init_weights(self):
+        self.conv1.weight.data.normal_(0, 0.01)
+        self.conv2.weight.data.normal_(0, 0.01)
+        if self.downsample is not None:
+            self.downsample.weight.data.normal_(0, 0.01)
+
+    def forward(self, x):
+        out = self.net(x)
+        res = x if self.downsample is None else self.downsample(x)
+        return self.relu(out + res)
+
+
+class TemporalConvNet(nn.Module):
+    def __init__(self, num_inputs, num_channels, kernel_size=2, dropout=0.1):
+        super(TemporalConvNet, self).__init__()
+        layers = []
+        num_channels = [num_channels]
+        num_levels = len(num_channels)
+        for i in range(num_levels):
+            dilation_size = 2 ** i
+            in_channels = num_inputs if i == 0 else num_channels[i - 1]
+            out_channels = num_channels[i]
+            layers += [TemporalBlock(in_channels, out_channels, kernel_size, stride=1, dilation=dilation_size,
+                                     padding=(kernel_size - 1) * dilation_size, dropout=dropout)]
+
+        self.network = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.network(x)
+
+
+class TransformerDecodingLayer(nn.Module):
+    def __init__(self, d_model, n_head, num_layers, dropout=0.1, activation="relu"):
+        super(TransformerDecodingLayer, self).__init__()
+        dim_feedforward = 2 * d_model
+        self.transformer_layer = nn.TransformerDecoderLayer(d_model, n_head, dim_feedforward, dropout, activation,
+                                                            batch_first=True)
+        self.transformer = nn.TransformerDecoder(self.transformer_layer, num_layers)
+
+    def forward(self, tgt, memory, mask=None):
+        tgt = self.transformer_layer(tgt, memory, mask)
+        return tgt
+
+
+class TCN_Layer(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size,
+                 dropout,
+                 bias=True):
+        super(TCN_Layer, self).__init__()
+        self.kernel_size = kernel_size
+        padding = (
+            (kernel_size[0] - 1) // 2, (kernel_size[1] - 1) // 2)  # padding so that both dimensions are maintained
+        assert kernel_size[0] % 2 == 1 and kernel_size[1] % 2 == 1
+
+        self.block = [nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding),
+                      nn.BatchNorm2d(out_channels), nn.Dropout(dropout, inplace=True)]
+
+        self.block = nn.Sequential(*self.block)
+
+    def forward(self, x):
+        output = self.block(x)
+        return output
+
+
+class Model(nn.Module):
+    def __init__(self, in_features, hidden_features, input_time_frame, output_time_frame, st_attn_dropout,
+                 st_cnn_dropout, n_txcnn_layers, txc_kernel_size, txc_dropout, heads, spatial_scales,
+                 temporal_scales, temporal_scales2):
+
+        super(Model, self).__init__()
+        self.input_time_frame = input_time_frame
+        self.output_time_frame = output_time_frame
+        self.st_gcnns = nn.ModuleList()
+        self.n_txcnn_layers = n_txcnn_layers
+        self.txcnns = nn.ModuleList()
+        self.T_emb = nn.Parameter(torch.FloatTensor(3 * in_features, input_time_frame))
+        self.S_emb = nn.Parameter(torch.FloatTensor(3 * in_features, spatial_scales[0]))
+        nn.init.xavier_uniform_(self.T_emb, gain=1.414)
+        nn.init.xavier_uniform_(self.S_emb, gain=1.414)
+        self.st_gcnns.append(DMS_ST_GAT_layer(3 * in_features, 32, hidden_features, [1, 1], 1, heads, spatial_scales,
+                                              temporal_scales, st_attn_dropout, st_cnn_dropout))
+        self.st_gcnns.append(DMS_ST_GAT_layer(32, 64, hidden_features, [1, 1], 1, heads, spatial_scales,
+                                              temporal_scales, st_attn_dropout, st_cnn_dropout))
+        self.st_gcnns.append(DMS_ST_GAT_layer(64, 128, hidden_features, [1, 1], 1, heads, spatial_scales,
+                                              temporal_scales, st_attn_dropout, st_cnn_dropout))
+        self.st_gcnns.append(DMS_ST_GAT_layer(128, 64, hidden_features, [1, 1], 1, heads, spatial_scales,
+                                              temporal_scales, st_attn_dropout, st_cnn_dropout))
+        self.st_gcnns.append(DMS_ST_GAT_layer(64, 32, hidden_features, [1, 1], 1, heads, spatial_scales,
+                                              temporal_scales, st_attn_dropout, st_cnn_dropout))
+        self.st_gcnns.append(DMS_ST_GAT_layer(32, in_features, hidden_features, [1, 1], 1, heads, spatial_scales,
+                                              temporal_scales, st_attn_dropout, st_cnn_dropout))
+
+        self.txcnns.append(TCN_Layer(input_time_frame, output_time_frame, txc_kernel_size, txc_dropout))
+        # with kernel_size[3,3] the dimensinons of C,V will be maintained
+        for i in range(1, n_txcnn_layers):
+            self.txcnns.append(TCN_Layer(output_time_frame, output_time_frame, txc_kernel_size, txc_dropout))
+
+        self.prelus = nn.ModuleList()
+
+        for j in range(n_txcnn_layers):
+            self.prelus.append(nn.PReLU())
+
+        self.residual = nn.Sequential(nn.Conv2d(input_time_frame, output_time_frame, kernel_size=1, stride=(1, 1)),
+                                      nn.BatchNorm2d(output_time_frame))
+
+        # self.refine = DMS_ST_GAT_layer(in_features, in_features, hidden_features, [1, 1], 1, heads, spatial_scales,
+        #                                temporal_scales2, st_attn_dropout, st_cnn_dropout)
+
+    def forward(self, x):
+        e = 0
+        l = 0
+        B, C, T, J = x.size()
+        temp1 = x
+        v = x[:, :, 1:] - x[:, :, :-1]
+        v = torch.concat([v, v[:, :, -1].unsqueeze(2)], dim=2)
+        a = v[:, :, 1:] - v[:, :, :-1]
+        a = torch.concat([a, a[:, :, -1].unsqueeze(2)], dim=2)
+        x = torch.concat([x, v, a], dim=1)
+        x = x + self.S_emb.unsqueeze(0).unsqueeze(2) + self.T_emb.unsqueeze(0).unsqueeze(3)
+        for gcn in self.st_gcnns:
+            x = gcn(x)
+        x = x + temp1
+
+        x = x.permute(0, 2, 1, 3)  # prepare the input for the Time-Extrapolator-CNN (NCTV->NTCV)
+
+        x = self.prelus[0](self.txcnns[0](x))
+        temp2 = x
+
+        for i in range(1, self.n_txcnn_layers):
+            x = self.prelus[i](self.txcnns[i](x)) + x  # residual connection
+        x = temp2 + x
+
+        # x = x.permute(0, 2, 1, 3)
+        # x = self.refine(x)
+        # x = x.permute(0, 2, 1, 3)
+
+        return x

@@ -1,49 +1,8 @@
 import torch
 import torch.nn as nn
-import math
-import numpy as np
 import torch.nn.functional as F
-from torch.nn.utils import weight_norm
-import matplotlib.pyplot as plt
-from fixed_adj import spatial_fixed_adj, temporal_fixed_adj
 from utils.partition import DiffPoolingLayer
-import seaborn
-from utils.Transformer_Layer import Decoder_Layer
 from relative_position import cal_ST_SPD
-
-
-def get_sinusoid_encoding_table(n_position, d_hid):
-    def get_position_angle_vec(position):
-        return [position / np.power(10000, 2 * (hid_j // 2) / d_hid) for hid_j in range(d_hid)]
-
-    sinusoid_table = np.array([get_position_angle_vec(pos_i) for pos_i in range(n_position)])
-    sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])
-    sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])
-    return torch.FloatTensor(sinusoid_table).unsqueeze(0)  # 1, T, d_hid
-
-
-class Temporal_Positional_Encoding(nn.Module):
-    def __init__(self, d_hid, n_position=200):
-        super(Temporal_Positional_Encoding, self).__init__()
-        self.register_buffer('pos_table', get_sinusoid_encoding_table(n_position, d_hid))
-
-    def forward(self, x):  # B, 3, T， J
-        p = self.pos_table[:, :x.size(1)] * 1000
-        return x + p
-
-
-class Spatial_Positional_Encoding(nn.Module):
-    def __init__(self, d_hid):
-        super(Spatial_Positional_Encoding, self).__init__()
-        self.d_hid = d_hid
-
-    def forward(self, x):  # B, J, 3
-        bs, joints, feat_dim = x.size()
-        temp = x[:, 8, :]
-        temp = temp.unsqueeze(1).repeat(1, joints, 1)
-        c = (torch.norm(x / 1000 - temp / 1000, dim=-1))
-        p = torch.exp(-c).unsqueeze(2)
-        return x + p
 
 
 class AttentionLayer(nn.Module):
@@ -62,22 +21,8 @@ class AttentionLayer(nn.Module):
 
         self.leaky_relu = nn.LeakyReLU(negative_slope)
         self.dropout = nn.Dropout(dropout)
-
-        # if bias and concat:
-        #     self.bias = nn.Parameter(torch.Tensor(heads * out_channels))
-        # elif bias and not concat:
-        #     self.bias = nn.Parameter(torch.Tensor(out_channels))
-        # else:
-        #     self.register_parameter('bias', None)
         self.bias = None
-
         # todo:在模块开始处加位置编码
-        # if pos_enc == 'spatial':
-        #     self.pos_enc = Spatial_Positional_Encoding(in_features)
-        #     # self.adj = spatial_fixed_adj(joints, frames).to('cuda:0')
-        # else:
-        #     self.pos_enc = Temporal_Positional_Encoding(in_features)
-        #     # self.adj = temporal_fixed_adj(joints, frames).to('cuda:0')
 
     def forward(self, src, mask=None):  # input: [B, N, in_features]
         B, N, _ = src.size()
@@ -465,66 +410,6 @@ class DMS_ST_GAT_layer(nn.Module):
         # out = out.permute(0, 2, 3, 1)
         return out
 
-
-class Chomp1d(nn.Module):
-    def __init__(self, chomp_size):
-        super(Chomp1d, self).__init__()
-        self.chomp_size = chomp_size
-
-    def forward(self, x):
-        return x[:, :, :-self.chomp_size].contiguous()
-
-
-class TemporalBlock(nn.Module):
-    def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=0.2):
-        super(TemporalBlock, self).__init__()
-        self.conv1 = weight_norm(nn.Conv1d(n_inputs, n_outputs, kernel_size,
-                                           stride=stride, padding=padding, dilation=dilation))
-        self.chomp1 = Chomp1d(padding)
-        self.relu1 = nn.ReLU()
-        self.dropout1 = nn.Dropout(dropout)
-
-        self.conv2 = weight_norm(nn.Conv1d(n_outputs, n_outputs, kernel_size,
-                                           stride=stride, padding=padding, dilation=dilation))
-        self.chomp2 = Chomp1d(padding)
-        self.relu2 = nn.ReLU()
-        self.dropout2 = nn.Dropout(dropout)
-
-        self.net = nn.Sequential(self.conv1, self.chomp1, self.relu1, self.dropout1,
-                                 self.conv2, self.chomp2, self.relu2, self.dropout2)
-        self.downsample = nn.Conv1d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
-        self.relu = nn.ReLU()
-        self.init_weights()
-
-    def init_weights(self):
-        self.conv1.weight.data.normal_(0, 0.01)
-        self.conv2.weight.data.normal_(0, 0.01)
-        if self.downsample is not None:
-            self.downsample.weight.data.normal_(0, 0.01)
-
-    def forward(self, x):
-        out = self.net(x)
-        res = x if self.downsample is None else self.downsample(x)
-        return self.relu(out + res)
-
-
-class TemporalConvNet(nn.Module):
-    def __init__(self, num_inputs, num_channels, kernel_size=2, dropout=0.1):
-        super(TemporalConvNet, self).__init__()
-        layers = []
-        num_channels = [num_channels]
-        num_levels = len(num_channels)
-        for i in range(num_levels):
-            dilation_size = 2 ** i
-            in_channels = num_inputs if i == 0 else num_channels[i - 1]
-            out_channels = num_channels[i]
-            layers += [TemporalBlock(in_channels, out_channels, kernel_size, stride=1, dilation=dilation_size,
-                                     padding=(kernel_size - 1) * dilation_size, dropout=dropout)]
-
-        self.network = nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.network(x)
 
 
 class TransformerDecodingLayer(nn.Module):

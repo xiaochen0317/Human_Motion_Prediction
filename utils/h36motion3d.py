@@ -17,7 +17,7 @@ https://github.com/wei-mao-2019/HisRepItself/blob/master/utils/h36motion3d.py
 
 class Datasets(Dataset):
 
-    def __init__(self, data_dir,input_n,output_n,skip_rate, actions=None,test_manner='all', split=0):
+    def __init__(self, data_dir,input_n,output_n,skip_rate, actions=None,test_manner='8', split=0):
         """
         :param path_to_data:
         :param actions:
@@ -131,7 +131,7 @@ class Datasets(Dataset):
                         self.data_idx.extend(zip(tmp_data_idx_1, tmp_data_idx_2))
                     elif test_manner == "8":
                         # 随机取 8 个
-                        fs_sel1, fs_sel2 = data_utils.find_indices_srnn(num_frames1, num_frames2, seq_len)
+                        fs_sel1, fs_sel2 = data_utils.find_indices_256(num_frames1, num_frames2, seq_len)
                         valid_frames = fs_sel1[:, 0]
                         tmp_data_idx_1 = [key] * len(valid_frames)
                         tmp_data_idx_2 = list(valid_frames)

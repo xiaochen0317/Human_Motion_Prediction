@@ -222,7 +222,7 @@ def visualize(input_n, output_n, visualize_from, path, modello, device, n_viz, s
             )
             # plt.show()
 
-            line_anim.save('human_viz.gif', writer='pillow')
+            line_anim.save('human_viz111.gif', writer='pillow')
 
             if cnt == n_viz - 1:
                 break
