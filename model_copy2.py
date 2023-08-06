@@ -1,8 +1,320 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils.partition import DiffPoolingLayer
+from utils.partition import PoolingLayer
 from relative_position import cal_ST_SPD
+
+
+class GraphAttentionLayer(nn.Module):
+    """
+    Simple GAT layer, similar to https://arxiv.org/abs/1710.10903
+    """
+
+    def __init__(self, in_features, out_features, dropout=0.1, alpha=0.2):
+        super(GraphAttentionLayer, self).__init__()
+        self.dropout = dropout
+        self.in_features = in_features
+        self.out_features = out_features
+
+        self.W = nn.Parameter(torch.zeros(size=(in_features, out_features)))
+        nn.init.xavier_uniform_(self.W.data, gain=1.414)
+        self.a = nn.Parameter(torch.zeros(size=(2*out_features, 1)))
+        nn.init.xavier_uniform_(self.a.data, gain=1.414)
+
+        self.softmax = nn.Softmax(dim=-1)
+        self.dropout = nn.Dropout(dropout)
+        self.leakyrelu = nn.LeakyReLU(alpha)
+
+    def forward(self, src, bias=None):
+        # src: [B, N, C]
+        # bias: [B, N, N]
+        h = torch.matmul(src, self.W)  # [B, N, C] * [C, C'] -> [N, N, C']
+        N = h.size()[1]
+
+        a_input = torch.cat([h.repeat(1, N).view(N * N, -1), h.repeat(N, 1)], dim=1).view(N, -1, 2 * self.out_features)
+        e = self.leakyrelu(torch.matmul(a_input, self.a).squeeze(2))
+        if bias is not  None:
+            e += bias
+
+        attention = self.softmax(e)
+        attention = self.dropout(attention)
+        h_prime = torch.matmul(attention, h)
+
+        return h_prime, attention
+
+
+class Scaled_Dot_Product_Attention(nn.Module):
+    def __init__(self, factor, attn_dropout=0.1):
+        super(Scaled_Dot_Product_Attention, self).__init__()
+        self.factor = factor
+        self.dropout = nn.Dropout(attn_dropout)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, q, k, v, mask=None):
+        attn = torch.matmul(q / self.factor, k.transpose(1, 2))
+        if mask is not None:
+            attn = attn.masked_fill(mask == 0, -1e9)
+        attn = self.dropout(self.softmax(attn))
+        output = torch.matmul(attn, v)
+        return output, attn
+
+
+class Attention(nn.Module):
+    def __init__(self, d_model, d_k, d_v, dropout=0.1):
+        super(Attention, self).__init__()
+        self.d_model = d_model
+        self.d_k = d_k
+        self.d_v = d_v
+        self.W_Q = nn.Linear(d_model, d_k, bias=False)
+        self.W_K = nn.Linear(d_model, d_k, bias=False)
+        self.W_V = nn.Linear(d_model, d_v, bias=False)
+        self.FC = nn.Linear(d_v, d_model, bias=False)
+        self.attention = Scaled_Dot_Product_Attention(factor=d_k ** 0.5)
+        self.dropout = nn.Dropout(dropout)
+        self.LN = nn.LayerNorm(d_model, eps=1e-6)
+
+    def forward(self, q, k, v, mask=None):
+        d_k, d_v = self.d_k, self.d_v
+        b_sz, len_q, len_k, len_v = q.size(0), q.size(1), k.size(1), v.size(1)
+        residual = q
+        q = self.W_Q(q).view(b_sz, len_q, d_k)
+        k = self.W_K(k).view(b_sz, len_k, d_k)
+        v = self.W_V(v).view(b_sz, len_v, d_v)
+        if mask is not None:
+            mask = mask.unqueeze(1)
+        q, attn = self.attention(q, k, v, mask=mask)
+        # attn: b_sz, len_q, len_k (len_k = len_v)
+        # q: b_sz, len_q, d_v
+        q = self.dropout(self.FC(q))  # q: b_sz, len_q, d_model
+        q += residual
+        # todo: LN应该在残差里还是外？
+        q = self.LN(q)
+        return q, attn
+
+
+class Position_wise_Feed_Forward(nn.Module):
+    def __init__(self, d_in, d_hid, dropout=0.1):
+        super(Position_wise_Feed_Forward, self).__init__()
+        self.W_1 = nn.Linear(d_in, d_hid)
+        self.W_2 = nn.Linear(d_hid, d_in)
+        self.LN = nn.LayerNorm(d_in, eps=1e-6)
+        self.ReLU = nn.ReLU()
+        self.Dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        residual = x
+        x = self.W_2(self.ReLU(self.W_1(x)))
+        x = self.Dropout(x)
+        x += residual
+        x = self.LN(x)
+        return x
+
+
+class Spatial_Encoder(nn.Module):
+    def __init__(self, in_features, out_features, hidden_features, pooling_hidden_features,
+                 joints, frames, spatial_scales, slope=0.2, dropout=0.1):
+        super(Spatial_Encoder, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.hidden_features = hidden_features
+        self.pooling_hidden_features = pooling_hidden_features
+        self.joints = joints
+        self.frames = frames
+        self.spatial_scales = spatial_scales
+        self.all_attn1 = nn.Linear(frames * out_features, 1, bias=False)
+        self.all_attn2 = nn.Linear(frames * out_features, 1, bias=False)
+
+        self.QKV_emb()
+
+        self.leaky_relu = nn.LeakyReLU(slope)
+        self.softmax = nn.Softmax(dim=-1)
+        self.dropout = nn.Dropout(dropout)
+
+
+    def QKV_emb(self):
+        self.W_Q = nn.Linear(self.in_features, self.hidden_features, bias=False)
+        self.W_K = nn.Linear(self.in_features, self.hidden_features, bias=False)
+        self.W_V = nn.Linear(self.in_features, self.hidden_features, bias=False)
+
+
+    def all_GAT(self, src, bias=None):
+        # src: [B, T, J, C_out]
+        # bias: [B, J, J]
+        B, T, J, C_in = src.size()
+        src_emb = self.node_emb(src).permute(0, 2, 1, 3) # [B, T, J, C_out] -> [B, J, T, C_out]
+        src_emb = src_emb.view(B, J, -1)  # [B, J, T*C_out]
+
+        attn_src = self.all_attn1(src_emb)  # B, J, 1
+        attn_tgr = self.all_attn1(src_emb)  # B, J, 1
+        attention = attn_src.expand(-1, -1, J) + attn_tgr.expand(-1, -1, J).permute(0, 2, 1)  # B, J, J
+
+        attention = self.leaky_relu(attention)
+        if bias is not  None:
+            attention += bias
+        attention = self.dropout(attention)
+
+        output = torch.matmul(attention, src_emb)  # [B, J, J] * [B, J, -1] -> [B, J, -1]
+
+        return output, attention
+
+    def Multiscale_Pooling(self, src, adj):
+        # src: [B, T, J, C]
+        # adj: [B, J, J]
+        B, T, J, C_in = src.size()
+        src =
+
+        return S
+
+    def forward(self, src):
+        # src: [B, T, J, C]
+        B, T, J, C_in = src.size()
+        src_Q = self.W_Q(src)  # B, T, J, C_out
+        src_K = self.W_K(src)  # B, T, J, C_out
+        src_V = self.W_V(src)  # B, T, J, C_out
+
+
+
+        return
+
+
+
+
+
+
+
+class ST_GAT_Encoder(nn.Module):
+    def __init__(self, joints, frames, in_features, out_features, node_emb_features, edge_emb_features,
+                 spatial_scales, temporal_scales):
+        super(ST_GAT_Encoder, self).__init__()
+        self.joints = joints
+        self.frames = frames
+        self.in_features = in_features
+        self.out_features = out_features
+        self.node_emb_features = node_emb_features
+        self.edge_emb_features = edge_emb_features
+
+        self.fully_spatial_node_emb = nn.Linear(in_features, node_emb_features)
+        self.fully_spatial_edge_emb = nn.Linear(in_features, edge_emb_features)
+        self.fully_spatial_attention = nn.Parameter(torch.zeros(size=(node_emb_features+edge_emb_features, 1)))
+        nn.init.xavier_uniform_(self.fully_spatial_attention.data, gain=1.414)
+        self.fully_temporal_node_emb = nn.Linear(in_features, node_emb_features)
+        self.fully_temporal_edge_emb = nn.Linear(in_features, edge_emb_features)
+
+
+    def fully_spatial_multiscale_GAT(self, src):
+        # src: [B, T, J, C_in]
+        B, T, J, C_in = src.size()
+        src = src.permute(0, 2, 1, 3)  # B, J, T, C_in
+        node_feat = src.view(B, J, T * C_in)
+        edge_feat = (src[:, :, 1:, :] - src[:, :, :-1, :]).view(B, J, (T - 1) * C_in)  # B, J, (T-1)*C_in
+        node_feat_emb = self.fully_spatial_node_emb(node_feat)  # B, J, C_out1
+        edge_feat_emb = self.fully_spatial_edge_emb(edge_feat)  # B, J, C_out2
+        feat_emb = torch.concat([node_feat_emb, edge_feat_emb], dim=-1)  # B, J, C_out1+C_out2
+        spatial_output, spatial_adj = self.fully_spatial_GAT(feat_emb)  # B, J, C_out  B, J, J
+
+
+
+
+
+        return fully_spatial_output, fully_spatial_adj, spatial_pooling_mat
+
+
+    def fully_multiscale_spatial_encoder(self, src):
+        # src: [B, J, T*C]
+
+
+        return
+
+
+    def forward(self, src):
+        # src: [B, T, J, C]
+    class GAT(nn.Module):
+        def __init__(self, nfeat, nhid, nclass, dropout, alpha, nheads):
+            """Dense version of GAT."""
+            super(GAT, self).__init__()
+            self.dropout = dropout
+
+            self.attentions = [GraphAttentionLayer(nfeat, nhid, dropout=dropout, alpha=alpha, concat=True) for _ in
+                               range(nheads)]
+            for i, attention in enumerate(self.attentions):
+                self.add_module('attention_{}'.format(i), attention)
+
+            self.out_att = GraphAttentionLayer(nhid * nheads, nclass, dropout=dropout, alpha=alpha,
+                                               concat=False)  # 第二层(最后一层)的attention layer
+
+        def forward(self, x, adj):
+            x = F.dropout(x, self.dropout, training=self.training)
+            x = torch.cat([att(x, adj) for att in self.attentions], dim=1)  # 将每层attention拼接
+            x = F.dropout(x, self.dropout, training=self.training)
+            x = F.elu(self.out_att(x, adj))  # 第二层的attention layer
+            return F.log_softmax(x, dim=1)
+
+        def __init__(self, in_features, out_features, dropout, alpha, concat=True):
+            super(GraphAttentionLayer, self).__init__()
+            self.dropout = dropout
+            self.in_features = in_features
+            self.out_features = out_features
+            self.alpha = alpha
+            self.concat = concat
+
+            self.W = nn.Parameter(torch.empty(size=(in_features, out_features)))
+            nn.init.xavier_uniform_(self.W.data, gain=1.414)
+            self.a = nn.Parameter(torch.empty(size=(2 * out_features, 1)))  # concat(V,NeigV)
+            nn.init.xavier_uniform_(self.a.data, gain=1.414)
+
+            self.leakyrelu = nn.LeakyReLU(self.alpha)
+        return
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class AttentionLayer(nn.Module):
@@ -67,13 +379,13 @@ class spatial_edge_enhanced_attention(nn.Module):
         self.joints = joints  # J
 
         self.edge_emb_layer = nn.Linear(in_features, hidden_features, bias=True)
-        self.edgefeat_linear1 = nn.Linear(in_features, hidden_features // 2, bias=False)
+        self.edgefeat_linear1 = nn.Linear(hidden_features, hidden_features // 2, bias=False)
         self.prelu = nn.PReLU()
         self.edgefeat_linear2 = nn.Linear(hidden_features // 2, 1, bias=False)
 
     def forward(self, src, s_SPD, device='cuda:0'):  # src: B*T, J, C  s_SPD:List[J, J]
         B, N, C = src.size()
-        edge_SPD_feat = torch.zeros([B, N, N, C]).to(device)
+        edge_SPD_feat = torch.zeros([B, N, N, self.hidden_features]).to(device)
         for i in range(self.joints):
             for j in range(self.joints):
                 SPD = s_SPD[i][j]
@@ -83,7 +395,7 @@ class spatial_edge_enhanced_attention(nn.Module):
                     head = SPD[k]
                     end = SPD[k]
                     edge = src[:, end, :] - src[:, head, :]  # bone_vector: B, C
-                    # edge = self.edge_emb_layer(edge)  # bone_vector: B, C'
+                    edge = self.edge_emb_layer(edge)  # bone_vector: B, C'
                     edge_SPD_feat[:, i, j, :] += edge
         edge_attn = self.edgefeat_linear2(self.prelu(self.edgefeat_linear1(edge_SPD_feat)))
         return edge_attn
@@ -97,13 +409,13 @@ class temporal_edge_enhanced_attention(nn.Module):
         self.frames = frames
 
         self.edge_emb_layer = nn.Linear(in_features, hidden_features, bias=True)
-        self.edgefeat_linear1 = nn.Linear(in_features, hidden_features // 2, bias=False)
+        self.edgefeat_linear1 = nn.Linear(hidden_features, hidden_features // 2, bias=False)
         self.prelu = nn.PReLU()
         self.edgefeat_linear2 = nn.Linear(hidden_features // 2, 1, bias=False)
 
     def forward(self, src, t_SPD, device='cuda:0'):
         B, N, C = src.size()
-        edge_SPD_feat = torch.zeros([B, N, N, C]).to(device)
+        edge_SPD_feat = torch.zeros([B, N, N, self.hidden_features]).to(device)
         for i in range(self.frames):
             for j in range(self.frames):
                 SPD = t_SPD[i][j]
@@ -112,7 +424,7 @@ class temporal_edge_enhanced_attention(nn.Module):
                     head = SPD[k]
                     end = SPD[k]
                     edge = src[:, end, :] - src[:, head, :]  # bone_vector: B, C
-                    # edge = self.edge_emb_layer(edge)  # bone_vector: B, C'
+                    edge = self.edge_emb_layer(edge)  # bone_vector: B, C'
                     edge_SPD_feat[:, i, j, :] += edge
         edge_attn = self.edgefeat_linear2(self.prelu(self.edgefeat_linear1(edge_SPD_feat)))
         return edge_attn
@@ -140,11 +452,6 @@ class DMS_STAttention(nn.Module):
         nn.init.xavier_uniform_(self.ta_bias, gain=1.414)
         self.softmax = nn.Softmax(dim=-1)
 
-        # self.spatial_left = []
-        # self.spatial_right = []
-        # self.temporal_left = []
-        # self.temporal_right = []
-
         for i in range(len(spatial_scales)):
             self.spatial_gat.append(AttentionLayer(in_features, hidden_features))
             if i < len(spatial_scales) - 1:
@@ -157,8 +464,8 @@ class DMS_STAttention(nn.Module):
                     DiffPoolingLayer(self.in_features, 32, self.temporal_scales[i + 1]))
 
         self.dropout = nn.Dropout(0.1)
-        # self.seea = spatial_edge_enhanced_attention(in_features, hidden_features, spatial_scales[0])
-        # self.teea = temporal_edge_enhanced_attention(in_features, hidden_features, temporal_scales[0])
+        self.seea = spatial_edge_enhanced_attention(in_features, hidden_features, spatial_scales[0])
+        self.teea = temporal_edge_enhanced_attention(in_features, hidden_features, temporal_scales[0])
         self.s_SPD, self.t_SPD = cal_ST_SPD()
 
     def forward(self, src, device='cuda:0'):
@@ -169,14 +476,14 @@ class DMS_STAttention(nn.Module):
         # Spatial GAT
         spatial_input = src.permute(0, 2, 3, 1).reshape(B * T, J, C)
         s_coef = self.s_coef(spatial_input)
-        # s_eea = self.seea(spatial_input, self.s_SPD)
+        s_eea = self.seea(spatial_input, self.s_SPD)
         spatial_attention = []
         for i in range(len(self.spatial_scales) - 1):
             spatial_attention.append(self.spatial_gat[i](spatial_input))  # B*T，J， J
             spatial_input, s1 = self.spatial_pool[i](spatial_input, spatial_attention[i])
             s_ma1.append(s1)
         spatial_attention.append(self.spatial_gat[-1](spatial_input))
-        coef = s_coef[:, 0].unsqueeze(-1).unsqueeze(-1).repeat(1, self.spatial_scales[0], self.spatial_scales[0])
+        # coef = s_coef[:, 0].unsqueeze(-1).unsqueeze(-1).repeat(1, self.spatial_scales[0], self.spatial_scales[0])
         # sa_fusion = spatial_attention[0] * coef
         sa_fusion = spatial_attention[0]
         for i in range(1, len(self.spatial_scales)):  # 从1尺度开始计算
@@ -199,7 +506,7 @@ class DMS_STAttention(nn.Module):
         # Temporal GAT
         temporal_input = src.permute(0, 3, 2, 1).reshape(B * J, T, C)
         t_coef = self.t_coef(temporal_input)
-        # t_eea = self.teea(temporal_input, self.t_SPD)
+        t_eea = self.teea(temporal_input, self.t_SPD)
         temporal_attention = []
         for i in range(len(self.temporal_scales) - 1):
             temporal_attention.append(self.temporal_gat[i](temporal_input))

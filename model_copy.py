@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.nn.utils import weight_norm
 import matplotlib.pyplot as plt
 from fixed_adj import spatial_fixed_adj, temporal_fixed_adj
-from utils.partition import DiffPoolingLayer
+from utils.partition import PoolingLayer
 import seaborn
 from utils.Transformer_Layer import Decoder_Layer
 from relative_position import cal_ST_SPD
@@ -204,12 +204,12 @@ class DMS_STAttention(nn.Module):
             self.spatial_gat.append(AttentionLayer(in_features, hidden_features))
             if i < len(spatial_scales) - 1:
                 self.spatial_pool.append(
-                    DiffPoolingLayer(self.in_features, 32, self.spatial_scales[i + 1]))
+                    PoolingLayer(self.in_features, 32, self.spatial_scales[i + 1]))
         for i in range(len(temporal_scales)):
             self.temporal_gat.append(AttentionLayer(in_features, hidden_features))
             if i < len(temporal_scales) - 1:
                 self.temporal_pool.append(
-                    DiffPoolingLayer(self.in_features, 32, self.temporal_scales[i + 1]))
+                    PoolingLayer(self.in_features, 32, self.temporal_scales[i + 1]))
 
         self.dropout = nn.Dropout(0.1)
         # self.seea = spatial_edge_enhanced_attention(in_features, hidden_features, spatial_scales[0])

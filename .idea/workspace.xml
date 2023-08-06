@@ -5,18 +5,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="c4c03faa-dc48-4560-ae51-9018eeffc095" name="变更" comment="变更">
-      <change afterPath="$PROJECT_DIR$/model_copy2.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/checkpoints/CKPT_3D_H36M/h36_3d_25frames_ckpt" beforeDir="false" afterPath="$PROJECT_DIR$/checkpoints/CKPT_3D_H36M/h36_3d_25frames_ckpt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main_h36_3d.py" beforeDir="false" afterPath="$PROJECT_DIR$/main_h36_3d.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/model.py" beforeDir="false" afterPath="$PROJECT_DIR$/model.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/model_copy.py" beforeDir="false" afterPath="$PROJECT_DIR$/model_copy.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/relative_position.py" beforeDir="false" afterPath="$PROJECT_DIR$/relative_position.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/h36_3d_viz.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/h36_3d_viz.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/h36motion3d.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/h36motion3d.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/parser.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/parser.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/partition.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/partition.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/model_copy2.py" beforeDir="false" afterPath="$PROJECT_DIR$/model_copy2.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -50,7 +40,7 @@
   "keyToString": {
     "RunOnceActivity.OpenProjectViewOnStart": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
-    "last_opened_file_path": "/home/yons/fuxian/MSRGCN-main",
+    "last_opened_file_path": "/home/yons/Project-master",
     "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
 }]]></component>
@@ -264,7 +254,28 @@
       <option name="project" value="LOCAL" />
       <updated>1690467892031</updated>
     </task>
-    <option name="localTasksCounter" value="9" />
+    <task id="LOCAL-00009" summary="变更">
+      <created>1691148743942</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1691148743942</updated>
+    </task>
+    <task id="LOCAL-00010" summary="变更">
+      <created>1691329366759</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1691329366759</updated>
+    </task>
+    <task id="LOCAL-00011" summary="变更">
+      <created>1691329372502</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1691329372502</updated>
+    </task>
+    <option name="localTasksCounter" value="12" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -295,11 +306,6 @@
           <url>file://$PROJECT_DIR$/utils/h36_3d_viz_copy.py</url>
           <line>113</line>
           <option name="timeStamp" value="9" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/model_copy2.py</url>
-          <line>143</line>
-          <option name="timeStamp" value="41" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/model.py</url>

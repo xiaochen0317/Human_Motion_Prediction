@@ -1,6 +1,7 @@
 import numpy as np
 import networkx as nx
 import torch.nn as nn
+import torch
 
 
 def cal_spatial_adj(I_link, J_link, joints, self_connected=False):
@@ -50,3 +51,44 @@ def cal_ST_SPD(joints=22, frames=10, I22_link=None, J22_link=None):
     T_SPD = cal_SPD(frames, T_adj)
     return S_SPD, T_SPD
 
+
+class Spatial_Edge_Enhance(nn.Module):
+    def __init__(self, joints, frames, I22_link, J22_link, embedding_dim):
+        super(Spatial_Edge_Enhance, self).__init__()
+        self.joints = joints
+        self.frames = frames
+        self.I22_link = I22_link
+        self.J22_link = J22_link
+        self.embedding_dim = embedding_dim
+
+        # 定义您需要的层或操作
+        self.linear = nn.Linear(embedding_dim, embedding_dim)  # 示例线性层
+
+    def forward(self, src):
+        # src: B x N x C
+
+        # 计算空间和时间最短路径矩阵
+        S_SPD, T_SPD = cal_ST_SPD(self.joints, self.frames, self.I22_link, self.J22_link)
+
+        # 使用最短路径矩阵计算两两节点的关系
+        pairwise_relations = self.calculate_pairwise_relations(S_SPD, T_SPD, src)
+
+        # 对关系应用任何必要的层或操作
+        pairwise_relations = self.linear(pairwise_relations)  # 示例线性层
+
+        return pairwise_relations
+
+    def calculate_pairwise_relations(self, S_SPD, T_SPD, src):
+        # 基于最短路径矩阵计算两两节点的关系
+        pairwise_relations = torch.zeros(self.joints, self.joints, self.embedding_dim)
+
+        for i in range(self.joints):
+            for j in range(self.joints):
+                cumulative_embedding = torch.zeros(self.embedding_dim)
+                for path in S_SPD[i][j]:
+                    for k in range(len(path) - 1):
+                        edge_embedding = src[:, path[k + 1], :] - src[:, path[k], :]
+                        cumulative_embedding += edge_embedding
+                pairwise_relations[i, j, :] = cumulative_embedding
+
+        return pairwise_relations

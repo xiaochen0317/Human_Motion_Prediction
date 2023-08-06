@@ -114,30 +114,23 @@ class PoolingGNN(nn.Module):
         return x3
 
 
-class DiffPoolingLayer(nn.Module):
+class PoolingLayer(nn.Module):
     def __init__(self, in_features, hidden_features, num_clusters):
-        super(DiffPoolingLayer, self).__init__()
+        super(PoolingLayer, self).__init__()
         self.in_features = in_features
         self.num_clusters = num_clusters
-        self.GNN_Pool = PoolingGNN(in_features, hidden_features, num_clusters)
+        self.GNN_Pool = PoolingGNN(in_features, 32, num_clusters)
         # todo:embedding?
         # self.GNN_Embed = PoolingGNN(in_features, hidden_features, hidden_features, linear=False)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, src, adj, mask=None):
-        # src: B, H, N, C
-        # adj: B, H, N, N
+        # src: B, N, C
+        # adj: B, N, N
         B, N, _ = adj.size()
-        # src = src.unsqueeze(1).repeat(1, H, 1, 1) if src.dim() == 3 else src
-        # S = torch.zeros([B, H, N, self.num_clusters]).to('cuda:0')
         S = self.GNN_Pool(src, adj, mask)
-        # for i in range(H):
-            # S[:, i, :, :] = self.GNN_Pool(src[:, i, :, :], adj[:, i, :, :], mask)
         # todo: 要不要除一个系数
         S = self.softmax(S)  # B, H, N, num_cluster
-        # print(S)
-        # S = nn.functional.gumbel_softmax(S, tau=0.1)
-        # S = nn.functional.gumbel_softmax(S, tau=0.1, hard=True)
 
         S_degree = (torch.sum(S, dim=1)+0.0001).unsqueeze(1).repeat(1, N, 1)  # B, H, N, num_cluster
         # todo: src embed->return?
