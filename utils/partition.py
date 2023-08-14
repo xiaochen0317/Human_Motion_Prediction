@@ -130,12 +130,13 @@ class PoolingLayer(nn.Module):
         B, N, _ = adj.size()
         S = self.GNN_Pool(src, adj, mask)
         # todo: 要不要除一个系数
-        S = self.softmax(S)  # B, H, N, num_cluster
+        S = self.softmax(S)  # B, N, num_cluster
 
-        S_degree = (torch.sum(S, dim=1)+0.0001).unsqueeze(1).repeat(1, N, 1)  # B, H, N, num_cluster
-        # todo: src embed->return?
-        # src = self.GNN_Embed(src, adj, mask)
-        out = torch.matmul(torch.div(S, S_degree).transpose(1, 2), src)  # B, H, num_cluster, N & B, H, N, C
+        # S_degree = (torch.sum(S, dim=1)+0.0001).unsqueeze(1).repeat(1, N, 1)  # B, H, N, num_cluster
+        # # todo: src embed->return?
+        # # src = self.GNN_Embed(src, adj, mask)
+        # out = torch.matmul(torch.div(S, S_degree).transpose(1, 2), src)  # B, H, num_cluster, N & B, H, N, C
+        out = torch.matmul(S.transpose(1, 2), src)
         return out, S  # [B, H, num_cluster, C] [B, H, N, num_cluster]
 
 

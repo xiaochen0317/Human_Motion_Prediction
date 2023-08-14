@@ -4,7 +4,11 @@ import torch.nn as nn
 import torch
 
 
-def cal_spatial_adj(I_link, J_link, joints, self_connected=False):
+def cal_spatial_adj(I_link=None, J_link=None, joints=22, self_connected=False):
+    if I_link is None:
+        I_link = np.array([8, 0, 1, 2, 8, 4, 5, 6, 8, 9, 10, 9, 12, 13, 14, 14, 9, 17, 18, 19, 19])
+    if J_link is None:
+        J_link = np.array([0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21])
     A = np.zeros([joints, joints])
     for i in range(len(I_link)):
         A[I_link[i], J_link[i]] = 1
@@ -15,7 +19,7 @@ def cal_spatial_adj(I_link, J_link, joints, self_connected=False):
     return A
 
 
-def cal_temporal_adj(frames, self_connected=False):
+def cal_temporal_adj(frames=10, self_connected=False):
     A = np.zeros([frames, frames])
     for i in range(frames - 1):
         A[i, i + 1] = 1

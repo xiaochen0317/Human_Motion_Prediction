@@ -6,7 +6,14 @@
   <component name="ChangeListManager">
     <list default="true" id="c4c03faa-dc48-4560-ae51-9018eeffc095" name="变更" comment="变更">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main_h36_3d.py" beforeDir="false" afterPath="$PROJECT_DIR$/main_h36_3d.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/model.py" beforeDir="false" afterPath="$PROJECT_DIR$/model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/model_copy.py" beforeDir="false" afterPath="$PROJECT_DIR$/model_copy.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/model_copy2.py" beforeDir="false" afterPath="$PROJECT_DIR$/model_copy2.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/relative_position.py" beforeDir="false" afterPath="$PROJECT_DIR$/relative_position.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils/parser.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/parser.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils/partition.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/partition.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -36,14 +43,14 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "RunOnceActivity.OpenProjectViewOnStart": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "last_opened_file_path": "/home/yons/Project-master",
-    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/home/yons/Project-master&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
   }
-}]]></component>
+}</component>
   <component name="RunManager" selected="Python.main_h36_3d">
     <configuration name="main_h36_3d" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
       <module name="DMS-STGAT" />
@@ -181,9 +188,9 @@
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.test" />
         <item itemvalue="Python.model_copy" />
         <item itemvalue="Python.relative_position" />
-        <item itemvalue="Python.test" />
         <item itemvalue="Python.parser" />
         <item itemvalue="Python.partition" />
       </list>
@@ -275,7 +282,14 @@
       <option name="project" value="LOCAL" />
       <updated>1691329372502</updated>
     </task>
-    <option name="localTasksCounter" value="12" />
+    <task id="LOCAL-00012" summary="变更">
+      <created>1691417862861</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1691417862861</updated>
+    </task>
+    <option name="localTasksCounter" value="13" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -306,11 +320,6 @@
           <url>file://$PROJECT_DIR$/utils/h36_3d_viz_copy.py</url>
           <line>113</line>
           <option name="timeStamp" value="9" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/model.py</url>
-          <line>314</line>
-          <option name="timeStamp" value="42" />
         </line-breakpoint>
       </breakpoints>
       <default-breakpoints>

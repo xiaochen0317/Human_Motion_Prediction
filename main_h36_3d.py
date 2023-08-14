@@ -1,7 +1,7 @@
 import os
 from utils import h36motion3d as datasets
 from torch.utils.data import DataLoader
-from model_copy2 import Model
+from model import Model
 import matplotlib.pyplot as plt
 import torch.optim as optim
 import torch.autograd
@@ -14,7 +14,7 @@ from utils.parser import args
 from bone_length import bone_length_loss
 
 
-def seed_torch(seed=1000):
+def seed_torch(seed=12000):
     os.environ['PYTHONHASHSEED'] = str(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -51,7 +51,7 @@ model = Model(args.input_dim, args.hidden_features, args.input_n, args.output_n,
 
 print('total number of parameters of the network is: ' + str(
     sum(p.numel() for p in model.parameters() if p.requires_grad)))
-
+# print(model)
 model_name = 'h36_3d_' + str(args.output_n) + 'frames_ckpt_test'
 
 
