@@ -14,7 +14,7 @@ from utils.parser import args
 from bone_length import bone_length_loss
 
 
-def seed_torch(seed=12000):
+def seed_torch(seed=13000):
     os.environ['PYTHONHASHSEED'] = str(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -225,8 +225,10 @@ def test():
                 all_joints_seq[:, :, dim_used] = sequences_predict
 
                 all_joints_seq[:, :, index_to_ignore] = all_joints_seq[:, :, index_to_equal]
-                loss = mpjpe_error(all_joints_seq.view(-1, args.output_n, 32, 3),
-                                   sequences_gt.view(-1, args.output_n, 32, 3))
+                # loss = mpjpe_error(all_joints_seq.view(-1, args.output_n, 32, 3),
+                #                    sequences_gt.view(-1, args.output_n, 32, 3))
+                loss = mpjpe_error(all_joints_seq[:, -1].view(-1, 1, 32, 3),
+                                   sequences_gt[:, -1].view(-1, 1, 32, 3))
                 running_loss += loss * batch_dim
                 accum_loss += loss * batch_dim
 

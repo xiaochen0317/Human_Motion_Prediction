@@ -1,5 +1,6 @@
 import torch
 
+
 def calculate_edge_features(adjacency_matrix, node_features):
     # 计算边特征张量
     num_nodes = adjacency_matrix.size(0)
@@ -14,6 +15,7 @@ def calculate_edge_features(adjacency_matrix, node_features):
     edge_features *= expanded_adj
 
     return edge_features
+
 
 # 示例邻接矩阵和节点特征集合（使用 PyTorch 张量）
 adjacency_matrix = torch.tensor([[0, 1, 0],

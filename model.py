@@ -92,9 +92,10 @@ class AttentionLayer(nn.Module):
         attn = attn_src.expand(-1, -1, N) + attn_dst.expand(-1, -1, N).permute(0, 2, 1)
 
         attn = self.leaky_relu(attn)
-        if adj is not None:
-            zero_vec = -9e15 * torch.ones_like(attn)
-            attn = torch.where(adj > 0, attn, zero_vec)  # [N,N]
+        # if adj is not None:
+        #     zero_vec = -9e15 * torch.ones_like(attn)
+        #     attn = torch.where(adj > 0, attn, zero_vec)  # [N,N]
+        attn = self.dropout(self.softmax(attn))
         attn = self.dropout(self.softmax(attn))
 
         if self.bias is not None:
@@ -319,19 +320,13 @@ class DMS_STAttention(nn.Module):
         # sa_fusion += s_eea.squeeze()
         # ta_fusion += t_eea.squeeze()
         sa_fusion = sa_fusion.reshape(B, T, J, J)
-        # sa_fusion_avg = sa_fusion.sum(dim=1)
+        # sa_fusion_avg = sa_fusion. sum(dim=1)
         ta_fusion = ta_fusion.reshape(B, J, T, T)
         # ta_fusion_avg = ta_fusion.sum(dim=1)
         # sa_fusion += sa_fusion_avg.unsqueeze(1)
         # ta_fusion += ta_fusion_avg.unsqueeze(1)
-        sa_fusion = self.sa_bias.unsqueeze(0).repeat(B, 1, 1, 1)
-        ta_fusion = self.ta_bias.unsqueeze(0).repeat(B, 1, 1, 1)
-        # sa_fusion += self.s_adj.unsqueeze(0).unsqueeze(0).repeat(B, T, 1, 1)
-        # ta_fusion += self.t_adj.unsqueeze(0).unsqueeze(0).repeat(B, J, 1, 1)
-        # sa_fusion = self.softmax(sa_fusion)
-        # ta_fusion = self.softmax(ta_fusion)
-        # sa_fusion = self.dropout(sa_fusion)
-        # ta_fusion = self.dropout(ta_fusion)
+        sa_fusion += self.sa_bias.unsqueeze(0).repeat(B, 1, 1, 1)
+        ta_fusion += self.ta_bias.unsqueeze(0).repeat(B, 1, 1, 1)
 
         return sa_fusion, ta_fusion
 
