@@ -106,8 +106,10 @@ def train():
 
             sequences_predict = model(sequences_train)
             sequences_predict = sequences_predict.permute(0, 1, 3, 2)  # B, T， J， 3
+            # sequences_rev = sequences_rev.permute(0, 1, 3, 2)  # B, T， J， 3
 
             loss1 = mpjpe_error(sequences_predict, sequences_gt)
+            # loss2 = mpjpe_error(sequences_rev, sequences_train.permute(0, 2, 3, 1))
             # loss2 = bone_length_loss(sequences_train.permute(0, 2, 3, 1),
             #                          sequences_predict, I_link, J_link)
 
@@ -159,7 +161,7 @@ def train():
             val_loss.append(running_loss.detach().cpu() / n)
             # print(n)
         test_error = test()
-        print('epoch %d  training loss: %.3f, validation loss: %.3f, test: %.3f' %
+        print('epoch %d  training loss: %.3f, validation loss: %.3f, testing loss: %.3f' %
               (epoch + 1, train_loss[-1], val_loss[-1], test_error))
 
         # if (epoch + 1) % 50 == 0:

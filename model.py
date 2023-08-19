@@ -10,7 +10,7 @@ from utils.partition import PoolingLayer
 import seaborn
 from utils.Transformer_Layer import Decoder_Layer
 from relative_position import cal_ST_SPD, cal_spatial_adj, cal_temporal_adj
-import torch.multiprocessing as mp
+from torch_geometric.nn import TransformerConv
 
 
 def get_sinusoid_encoding_table(n_position, d_hid):
@@ -214,9 +214,9 @@ class DMS_STAttention(nn.Module):
         self.s_coef = Mix_Coefficient(spatial_scales[0], in_features, len(spatial_scales))
         self.t_coef = Mix_Coefficient(temporal_scales[0], in_features, len(temporal_scales))
 
-        self.sa_bias = nn.Parameter(torch.FloatTensor(10, 22, 22))
+        self.sa_bias = nn.Parameter(torch.FloatTensor(temporal_scales[0], spatial_scales[0], spatial_scales[0]))
         nn.init.xavier_uniform_(self.sa_bias, gain=1.414)
-        self.ta_bias = nn.Parameter(torch.FloatTensor(22, 10, 10))
+        self.ta_bias = nn.Parameter(torch.FloatTensor(spatial_scales[0], temporal_scales[0], temporal_scales[0]))
         nn.init.xavier_uniform_(self.ta_bias, gain=1.414)
         self.softmax = nn.Softmax(dim=-1)
 
@@ -492,10 +492,6 @@ class Model(nn.Module):
                                               temporal_scales, st_attn_dropout, st_cnn_dropout))
         self.st_gcnns.append(DMS_ST_GAT_layer(32, 64, hidden_features, [1, 1], 1, heads, spatial_scales,
                                               temporal_scales, st_attn_dropout, st_cnn_dropout))
-        # self.st_gcnns.append(DMS_ST_GAT_layer(64, 128, hidden_features, [1, 1], 1, heads, spatial_scales,
-        #                                       temporal_scales, st_attn_dropout, st_cnn_dropout))
-        # self.st_gcnns.append(DMS_ST_GAT_layer(128, 64, hidden_features, [1, 1], 1, heads, spatial_scales,
-        #                                       temporal_scales, st_attn_dropout, st_cnn_dropout))
         self.st_gcnns.append(DMS_ST_GAT_layer(64, 32, hidden_features, [1, 1], 1, heads, spatial_scales,
                                               temporal_scales, st_attn_dropout, st_cnn_dropout))
         self.st_gcnns.append(DMS_ST_GAT_layer(32, in_features, hidden_features, [1, 1], 1, heads, spatial_scales,
@@ -514,13 +510,37 @@ class Model(nn.Module):
         self.residual = nn.Sequential(nn.Conv2d(input_time_frame, output_time_frame, kernel_size=1, stride=(1, 1)),
                                       nn.BatchNorm2d(output_time_frame))
 
-        # self.refine = DMS_ST_GAT_layer(in_features, in_features, hidden_features, [1, 1], 1, heads, spatial_scales,
-        #                                temporal_nnscales2, st_attn_dropout, st_cnn_dropout)
+        self.st_gcnns2 = nn.ModuleList()
+        self.txcnns2 = nn.ModuleList()
+        self.T_emb2 = nn.Parameter(torch.FloatTensor(3 * in_features, output_time_frame))
+        self.S_emb2 = nn.Parameter(torch.FloatTensor(3 * in_features, spatial_scales[0]))
+        nn.init.xavier_uniform_(self.T_emb2, gain=1.414)
+        nn.init.xavier_uniform_(self.S_emb2, gain=1.414)
+        self.st_gcnns2.append(DMS_ST_GAT_layer(3 * in_features, 32, hidden_features, [1, 1], 1, heads, spatial_scales,
+                                               temporal_scales2, st_attn_dropout, st_cnn_dropout))
+        self.st_gcnns2.append(DMS_ST_GAT_layer(32, 64, hidden_features, [1, 1], 1, heads, spatial_scales,
+                                               temporal_scales2, st_attn_dropout, st_cnn_dropout))
+        self.st_gcnns2.append(DMS_ST_GAT_layer(64, 32, hidden_features, [1, 1], 1, heads, spatial_scales,
+                                               temporal_scales2, st_attn_dropout, st_cnn_dropout))
+        self.st_gcnns2.append(DMS_ST_GAT_layer(32, in_features, hidden_features, [1, 1], 1, heads, spatial_scales,
+                                               temporal_scales2, st_attn_dropout, st_cnn_dropout))
+
+        self.txcnns2.append(TCN_Layer(output_time_frame, input_time_frame, txc_kernel_size, txc_dropout))
+        # with kernel_size[3,3] the dimensinons of C,V will be maintained
+        for i in range(1, n_txcnn_layers):
+            self.txcnns2.append(TCN_Layer(input_time_frame, input_time_frame, txc_kernel_size, txc_dropout))
+
+        self.residual2 = nn.Sequential(nn.Conv2d(output_time_frame, input_time_frame, kernel_size=1, stride=(1, 1)),
+                                       nn.BatchNorm2d(input_time_frame))
+
+        self.txcnns3 = nn.ModuleList()
+        self.txcnns3.append(TCN_Layer(input_time_frame, input_time_frame, txc_kernel_size, txc_dropout))
+        # with kernel_size[3,3] the dimensinons of C,V will be maintained
+        for i in range(1, n_txcnn_layers):
+            self.txcnns3.append(TCN_Layer(input_time_frame, input_time_frame, txc_kernel_size, txc_dropout))
 
     def forward(self, x):
-        e = 0
-        l = 0
-        B, C, T, J = x.size()
+        # B, C, T, J = x.size()
         temp1 = x
         v = x[:, :, 1:] - x[:, :, :-1]
         v = torch.concat([v, v[:, :, -1].unsqueeze(2)], dim=2)
@@ -533,17 +553,49 @@ class Model(nn.Module):
         x = x + temp1
 
         x = x.permute(0, 2, 1, 3)  # prepare the input for the Time-Extrapolator-CNN (NCTV->NTCV)
-        temp = self.residual(x)
+        temp = x
+        temp2 = self.residual(x)
 
         x = self.prelus[0](self.txcnns[0](x))
-        temp2 = x
 
         for i in range(1, self.n_txcnn_layers):
             x = self.prelus[i](self.txcnns[i](x)) + x  # residual connection
-        x = temp + x
+        x = temp2 + x
 
-        # x = x.permute(0, 2, 1, 3)
-        # x = self.refine(x)
-        # x = x.permute(0, 2, 1, 3)
+        x = x.flip(dims=[1]).permute(0, 2, 1, 3)  # B, T, C, J -> B, C, T, J
+        temp3 = x
+        v = x[:, :, 1:] - x[:, :, :-1]
+        v = torch.concat([v, v[:, :, -1].unsqueeze(2)], dim=2)
+        a = v[:, :, 1:] - v[:, :, :-1]
+        a = torch.concat([a, a[:, :, -1].unsqueeze(2)], dim=2)
+        x = torch.concat([x, v, a], dim=1)
+        x = x + self.S_emb2.unsqueeze(0).unsqueeze(2) + self.T_emb2.unsqueeze(0).unsqueeze(3)
+        for gcn in self.st_gcnns2:
+            x = gcn(x)
+        x = x + temp3
+
+        x = x.permute(0, 2, 1, 3)
+        temp4 = self.residual2(x)
+
+        x = self.prelus[0](self.txcnns2[0](x))
+        for i in range(1, self.n_txcnn_layers):
+            x = self.prelus[i](self.txcnns2[i](x)) + x  # residual connection
+        x += temp4
+        neg = x.flip(dims=[1])
+
+        offset = neg - temp1.permute(0, 2, 1, 3)
+        feedback = self.prelus[0](self.txcnns3[0](offset))
+
+        for i in range(1, self.n_txcnn_layers):
+            feedback = self.prelus[i](self.txcnns3[i](feedback)) + feedback
+
+        x = temp + feedback
+        temp5 = self.residual(x)
+
+        x = self.prelus[0](self.txcnns[0](x))
+
+        for i in range(1, self.n_txcnn_layers):
+            x = self.prelus[i](self.txcnns[i](x)) + x
+        x = temp5 + x
 
         return x

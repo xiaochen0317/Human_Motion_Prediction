@@ -27,7 +27,7 @@ parser.add_argument('--tcnn_kernel_size', type=list, default=[3, 3],
 parser.add_argument('--embedding_dim', type=int, default=40, help='dimensions for the coordinates of the embedding')
 parser.add_argument('--input_dim', type=int, default=3, help='dimensions of the input coordinates')
 parser.add_argument('--st_attn_dropout', type=float, default=0.0, help='st-attn dropout')
-parser.add_argument('--st_cnn_dropout', type=float, default=0.1, help='st-cnn dropout')
+parser.add_argument('--st_cnn_dropout', type=float, default=0.3, help='st-cnn dropout')
 parser.add_argument('--ccnn_dropout', type=float, default=0.0, help='ccnn dropout')
 parser.add_argument('--tcnn_dropout', type=float, default=0.0, help='tcnn dropout')
 
@@ -57,7 +57,7 @@ parser.add_argument('--actions_to_consider', default='all',
                     help='Actions to visualize.Choose either all or a list of actions')
 parser.add_argument('--n_viz', type=int, default='2', help='Numbers of sequences to visualize for each action')
 
-parser.add_argument('--hidden_features', type=int, default=128)
+parser.add_argument('--hidden_features', type=int, default=64)
 parser.add_argument('--heads', type=int, default=1)
 parser.add_argument('--loss_parameter', type=float, default=0.0)
 parser.add_argument('--lr_decay', type=float, default=1)
@@ -67,6 +67,6 @@ parser.add_argument('--alpha', type=float, default=0.5)
 parser.add_argument('--spatial_scales', type=list, default=[22])
 parser.add_argument('--temporal_scales', type=list, default=[10])
 parser.add_argument('--temporal_scales2', type=list, default=[25])
-parser.add_argument('--d_model', type=int, default=128)
+# parser.add_argument('--d_model', type=int, default=128)
 
 args = parser.parse_args()
