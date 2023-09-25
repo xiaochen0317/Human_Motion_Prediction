@@ -17,7 +17,7 @@ https://github.com/wei-mao-2019/HisRepItself/blob/master/utils/h36motion3d.py
 
 class Datasets(Dataset):
 
-    def __init__(self, data_dir,input_n,output_n,skip_rate, actions=None,test_manner='8', split=0):
+    def __init__(self, data_dir, input_n, output_n, skip_rate, actions=None, test_manner='8', split=0):
         """
         :param path_to_data:
         :param actions:
@@ -36,6 +36,7 @@ class Datasets(Dataset):
         self.data_idx = []
         seq_len = self.in_n + self.out_n
         subs = [[1, 6, 7, 8, 9], [11], [5]]
+        # subs = [[1], [11], [5]]
         # acts = data_utils.define_actions(actions)
         if actions is None:
             acts = ["walking", "eating", "smoking", "discussion", "directions",
@@ -77,7 +78,6 @@ class Datasets(Dataset):
                         self.p3d[key] = p3d.view(num_frames, -1).cpu().data.numpy()
 
                         valid_frames = np.arange(0, num_frames - seq_len + 1, skip_rate)
-
                         # tmp_data_idx_1 = [(subj, action, subact)] * len(valid_frames)
                         tmp_data_idx_1 = [key] * len(valid_frames)
                         tmp_data_idx_2 = list(valid_frames)
@@ -89,7 +89,6 @@ class Datasets(Dataset):
                     the_sequence1 = data_utils.readCSVasFloat(filename)
                     n, d = the_sequence1.shape
                     even_list = range(0, n, self.sample_rate)
-
                     num_frames1 = len(even_list)
                     the_sequence1 = np.array(the_sequence1[even_list, :])
                     the_seq1 = torch.from_numpy(the_sequence1).float().cuda()
@@ -109,7 +108,6 @@ class Datasets(Dataset):
                     the_seq2 = torch.from_numpy(the_sequence2).float().cuda()
                     the_seq2[:, 0:6] = 0
                     p3d2 = data_utils.expmap2xyz_torch(the_seq2)
-
                     # self.p3d[(subj, action, 2)] = p3d2.view(num_frames2, -1).cpu().data.numpy()
                     self.p3d[key + 1] = p3d2.view(num_frames2, -1).cpu().data.numpy()
 

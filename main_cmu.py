@@ -1,5 +1,5 @@
 import os
-from utils import h36motion3d as datasets
+from utils import cmu as datasets
 from torch.utils.data import DataLoader
 from model_copy import Model
 import matplotlib.pyplot as plt
@@ -11,6 +11,7 @@ from utils.loss_funcs import *
 from utils.data_utils import define_actions
 from utils.h36_3d_viz import visualize
 from utils.parser import args
+from bone_length import bone_length_loss
 
 
 def seed_torch(seed=13000):
@@ -95,7 +96,8 @@ def train():
             n += batch_dim
 
             # 改变
-            sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3, 3)
+            sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3, 3).\
+                permute(0, 3, 1, 2)
             sequences_gt = batch[:, args.input_n:args.input_n + args.output_n, dim_used].view(-1, args.output_n,
                                                                                               len(dim_used) // 3, 3)
             with torch.autograd.set_detect_anomaly(True):
@@ -103,7 +105,7 @@ def train():
                 # optimizer_reverse.zero_grad()
 
                 sequences_predict, sm_loss_all, so_loss_all, tm_loss_all, to_loss_all = model(sequences_train)
-                sequences_predict = sequences_predict
+                sequences_predict = sequences_predict.permute(0, 1, 3, 2)  # B, T， J， 3
                 # sequences_rev = sequences_rev.permute(0, 1, 3, 2)  # B, T， J， 3
 
                 loss1 = mpjpe_error(sequences_predict, sequences_gt)
@@ -113,7 +115,7 @@ def train():
 
                 # loss = loss1 + args.loss_parameter * loss2 + l + 0.1*e
                 # loss = loss1 + sm_loss_all + so_loss_all + tm_loss_all + to_loss_all
-                loss = loss1 + sm_loss_all + so_loss_all + to_loss_all + tm_loss_all
+                loss = loss1
                 # print('loss: %.3f, error: %.3f' % (loss1, e))
 
                 if cnt % 200 == 199:
@@ -141,11 +143,13 @@ def train():
                 batch_dim = batch.shape[0]
                 n += batch_dim
 
-                sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3, 3)
+                sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3, 3).\
+                permute(0, 3, 1, 2)
                 sequences_gt = batch[:, args.input_n:args.input_n + args.output_n, dim_used].view(-1, args.output_n,
                                                                                                   len(dim_used) // 3, 3)
 
                 sequences_predict, sm_loss_all, so_loss_all, tm_loss_all, to_loss_all = model(sequences_train)
+                sequences_predict = sequences_predict.permute(0, 1, 3, 2)  # B, T, J, 3
                 loss1 = mpjpe_error(sequences_predict, sequences_gt)
                 # loss2 = bone_length_loss(sequences_train.permute(0, 2, 3, 1),
                 #                          sequences_predict, I_link, J_link)
@@ -212,21 +216,21 @@ def test():
 
                 all_joints_seq = batch.clone()[:, args.input_n:args.input_n + args.output_n, :]
 
-                sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3, 3)
+                sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3, 3).\
+                permute(0, 3, 1, 2)
                 sequences_gt = batch[:, args.input_n:args.input_n + args.output_n, :]
 
                 sequences_predict, sm_loss_all, so_loss_all, tm_loss_all, to_loss_all = model(sequences_train)
-                sequences_predict = sequences_predict.view(-1, args.output_n, len(dim_used))
+                sequences_predict = sequences_predict.permute(0, 1, 3, 2).contiguous().view(-1, args.output_n,
+                                                                                            len(dim_used))
 
                 all_joints_seq[:, :, dim_used] = sequences_predict
 
                 all_joints_seq[:, :, index_to_ignore] = all_joints_seq[:, :, index_to_equal]
-                # loss = mpjpe_error(all_joints_seq.view(-1, args.output_n, 32, 3),
-                #                    sequences_gt.view(-1, args.output_n, 32, 3))
-                # loss = mpjpe_error(all_joints_seq[:, :, dim_used].view(-1, args.output_n, 22, 3),
-                #                    sequences_gt[:, :, dim_used].view(-1, args.output_n, 22, 3))
-                loss = mpjpe_error(all_joints_seq[:, -1].view(-1, 1, 32, 3),
-                                   sequences_gt[:, -1].view(-1, 1, 32, 3))
+                loss = mpjpe_error(all_joints_seq.view(-1, args.output_n, 32, 3),
+                                   sequences_gt.view(-1, args.output_n, 32, 3))
+                # loss = mpjpe_error(all_joints_seq[:, -1].view(-1, 1, 32, 3),
+                #                    sequences_gt[:, -1].view(-1, 1, 32, 3))
                 running_loss += loss * batch_dim
                 accum_loss += loss * batch_dim
 
