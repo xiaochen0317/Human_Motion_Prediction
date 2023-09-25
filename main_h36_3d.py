@@ -1,7 +1,7 @@
 import os
 from utils import h36motion3d as datasets
 from torch.utils.data import DataLoader
-from model_copy import Model
+from model_modify import Model
 import matplotlib.pyplot as plt
 import torch.optim as optim
 import torch.autograd
@@ -43,15 +43,35 @@ def lr_decay(optimizer, lr_now, gamma):
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('Using device: %s' % device)
 
-model = Model(args.input_dim, args.hidden_features, args.input_n, args.output_n, args.st_attn_dropout,
-              args.st_cnn_dropout, args.n_tcnn_layers, args.tcnn_kernel_size, args.tcnn_dropout, args.heads,
-              args.spatial_scales, args.temporal_scales, args.temporal_scales2).to(device)
+# model = Model(args.input_dim, args.hidden_features, args.input_n, args.output_n, args.st_attn_dropout,
+#               args.st_cnn_dropout, args.n_tcnn_layers, args.tcnn_kernel_size, args.tcnn_dropout, args.heads,
+#               args.spatial_scales, args.temporal_scales, args.temporal_scales2).to(device)
 
+model = Model(args.input_dim, args.output_dim, args.dim, args.heads, args.spatial_scales, args.temporal_scales,
+              args.qk_bias, args.qk_scale, args.dropout, args.attn_dropout, args.tcn_dropout, args.drop_path,
+              args.input_n, args.output_n, args.joints_to_consider, args.dcn_n, args.n_encoder_layer,
+              args.n_decoder_layer).to(device)
 
 print('total number of parameters of the network is: ' + str(
     sum(p.numel() for p in model.parameters() if p.requires_grad)))
 # print(model)
 model_name = 'h36_3d_' + str(args.output_n) + 'frames_ckpt_test'
+
+spatial_edge_index = torch.tensor([
+    [8, 0, 1, 2, 8, 4, 5, 6, 8, 9, 10, 9, 12, 13, 14, 14, 9, 17, 18, 19, 19,
+     0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
+    [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+     8, 0, 1, 2, 8, 4, 5, 6, 8, 9, 10, 9, 12, 13, 14, 14, 9, 17, 18, 19, 19]])
+temporal_edge_index = torch.tensor([
+    [0, 1, 2, 3, 4, 5, 6, 7, 8,
+     1, 2, 3, 4, 5, 6, 7, 8, 9],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9,
+     0, 1, 2, 3, 4, 5, 6, 7, 8]])
+spatial_adj = torch.sparse_coo_tensor(spatial_edge_index, torch.ones(spatial_edge_index.shape[1]),
+                                      torch.Size([args.joints_to_consider, args.joints_to_consider]))\
+    .to_dense().to(device)
+temporal_adj = torch.sparse_coo_tensor(temporal_edge_index, torch.ones(temporal_edge_index.shape[1]),
+                                       torch.Size([args.input_n, args.input_n])).to_dense().to(device)
 
 
 def train():
@@ -102,7 +122,8 @@ def train():
                 optimizer.zero_grad()
                 # optimizer_reverse.zero_grad()
 
-                sequences_predict, sm_loss_all, so_loss_all, tm_loss_all, to_loss_all = model(sequences_train)
+                # sequences_predict, sm_loss_all, so_loss_all, tm_loss_all, to_loss_all = model(sequences_train)
+                sequences_predict = model(sequences_train, spatial_adj, temporal_adj)
                 sequences_predict = sequences_predict
                 # sequences_rev = sequences_rev.permute(0, 1, 3, 2)  # B, T， J， 3
 
@@ -113,7 +134,7 @@ def train():
 
                 # loss = loss1 + args.loss_parameter * loss2 + l + 0.1*e
                 # loss = loss1 + sm_loss_all + so_loss_all + tm_loss_all + to_loss_all
-                loss = loss1 + sm_loss_all + so_loss_all + to_loss_all + tm_loss_all
+                loss = loss1
                 # print('loss: %.3f, error: %.3f' % (loss1, e))
 
                 if cnt % 200 == 199:
@@ -145,7 +166,8 @@ def train():
                 sequences_gt = batch[:, args.input_n:args.input_n + args.output_n, dim_used].view(-1, args.output_n,
                                                                                                   len(dim_used) // 3, 3)
 
-                sequences_predict, sm_loss_all, so_loss_all, tm_loss_all, to_loss_all = model(sequences_train)
+                # sequences_predict, sm_loss_all, so_loss_all, tm_loss_all, to_loss_all = model(sequences_train)
+                sequences_predict = model(sequences_train, spatial_adj, temporal_adj)
                 loss1 = mpjpe_error(sequences_predict, sequences_gt)
                 # loss2 = bone_length_loss(sequences_train.permute(0, 2, 3, 1),
                 #                          sequences_predict, I_link, J_link)
@@ -215,7 +237,8 @@ def test():
                 sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3, 3)
                 sequences_gt = batch[:, args.input_n:args.input_n + args.output_n, :]
 
-                sequences_predict, sm_loss_all, so_loss_all, tm_loss_all, to_loss_all = model(sequences_train)
+                # sequences_predict, sm_loss_all, so_loss_all, tm_loss_all, to_loss_all = model(sequences_train)
+                sequences_predict = model(sequences_train, spatial_adj, temporal_adj)
                 sequences_predict = sequences_predict.view(-1, args.output_n, len(dim_used))
 
                 all_joints_seq[:, :, dim_used] = sequences_predict
