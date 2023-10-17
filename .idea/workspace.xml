@@ -4,16 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="c4c03faa-dc48-4560-ae51-9018eeffc095" name="变更" comment="变更">
-      <change afterPath="$PROJECT_DIR$/h36_3d.sh" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/main_h36_3d_parallel.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/checkpoints/CKPT_3D_H36M/h36_3d_25frames_ckpt_test" beforeDir="false" afterPath="$PROJECT_DIR$/checkpoints/CKPT_3D_H36M/h36_3d_25frames_ckpt_test" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main_h36_3d.py" beforeDir="false" afterPath="$PROJECT_DIR$/main_h36_3d.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/h36motion3d.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/h36motion3d.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/parser.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/parser.py" afterDir="false" />
-    </list>
+    <list default="true" id="c4c03faa-dc48-4560-ae51-9018eeffc095" name="变更" comment="变更" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -310,7 +301,21 @@
       <option name="project" value="LOCAL" />
       <updated>1695607432219</updated>
     </task>
-    <option name="localTasksCounter" value="17" />
+    <task id="LOCAL-00017" summary="变更">
+      <created>1697545546096</created>
+      <option name="number" value="00017" />
+      <option name="presentableId" value="LOCAL-00017" />
+      <option name="project" value="LOCAL" />
+      <updated>1697545546096</updated>
+    </task>
+    <task id="LOCAL-00018" summary="变更">
+      <created>1697545577373</created>
+      <option name="number" value="00018" />
+      <option name="presentableId" value="LOCAL-00018" />
+      <option name="project" value="LOCAL" />
+      <updated>1697545577373</updated>
+    </task>
+    <option name="localTasksCounter" value="19" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
