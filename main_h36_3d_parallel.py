@@ -1,30 +1,34 @@
 import os
-from utils import h36motion3d as datasets
-from torch.utils.data import DataLoader
-from model_modify import Model
-import matplotlib.pyplot as plt
+import random
+from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 import torch.autograd
-import torch
+import torch.nn as nn
+from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import DataLoader
+import torch.distributed
+from torch.cuda.amp import GradScaler
+from model_modify import Model
+import matplotlib.pyplot as plt
 import numpy as np
 from utils.loss_funcs import *
 from utils.data_utils import define_actions
 from utils.h36_3d_viz import visualize
 from utils.parser import args
+from utils import h36motion3d as datasets
 from tqdm import tqdm
 
 
 def seed_torch(seed=0):
     os.environ['PYTHONHASHSEED'] = str(seed)
     np.random.seed(seed)
+    random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.enabled = True
-
-
-seed_torch()
 
 
 def fine_tuning(optimizer, lr_ft, loss):
@@ -41,21 +45,27 @@ def lr_decay(optimizer, lr_now, gamma):
     return lr
 
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print('Using device: %s' % device)
+local_rank = int(os.environ["LOCAL_RANK"])
+print(local_rank)
+seed_torch()
 
-# model = Model(args.input_dim, args.hidden_features, args.input_n, args.output_n, args.st_attn_dropout,
-#               args.st_cnn_dropout, args.n_tcnn_layers, args.tcnn_kernel_size, args.tcnn_dropout, args.heads,
-#               args.spatial_scales, args.temporal_scales, args.temporal_scales2).to(device)
+if local_rank != -1:
+    torch.cuda.set_device(local_rank)
+    torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
+device = torch.device('cuda:{}'.format(local_rank))
 model = Model(args.input_dim, args.output_dim, args.dim, args.heads, args.spatial_scales, args.temporal_scales,
               args.qk_bias, args.qk_scale, args.dropout, args.attn_dropout, args.tcn_dropout, args.drop_path,
               args.input_n, args.output_n, args.joints_to_consider, args.dcn_n, args.n_encoder_layer,
               args.n_decoder_layer).to(device)
 
-print('total number of parameters of the network is: ' + str(
-    sum(p.numel() for p in model.parameters() if p.requires_grad)))
-# print(model)
+model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank,
+                                            find_unused_parameters=True)
+
+print('Total number of parameters is: ' + str(sum(p.numel() for p in model.parameters() if p.requires_grad)))
+if args.restore_ckpt is not None:
+    model.load_state_dict(torch.load(args.restore_ckpt), strict=False)
+print(model)
 model_name = 'h36_3d_' + str(args.output_n) + 'frames_ckpt_test'
 
 spatial_edge_index = torch.tensor([
@@ -69,10 +79,10 @@ temporal_edge_index = torch.tensor([
     [1, 2, 3, 4, 5, 6, 7, 8, 9,
      0, 1, 2, 3, 4, 5, 6, 7, 8]])
 spatial_adj = torch.sparse_coo_tensor(spatial_edge_index, torch.ones(spatial_edge_index.shape[1]),
-                                      torch.Size([args.joints_to_consider, args.joints_to_consider]))\
-    .to_dense().to(device)
+                                      torch.Size([args.joints_to_consider, args.joints_to_consider])) \
+    .to_dense().cuda(non_blocking=True)
 temporal_adj = torch.sparse_coo_tensor(temporal_edge_index, torch.ones(temporal_edge_index.shape[1]),
-                                       torch.Size([args.input_n, args.input_n])).to_dense().to(device)
+                                       torch.Size([args.input_n, args.input_n])).to_dense().cuda(non_blocking=True)
 
 
 def train():
@@ -80,19 +90,26 @@ def train():
 
     if args.use_scheduler:
         scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.gamma)
-        # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
-    loss_threshold = 80
+    else:
+        scheduler = None
     best_acc = 1e9
+
+    total_steps = 0
+    scaler = GradScaler(enabled=args.mixed_precision)
 
     train_loss = []
     val_loss = []
-    dataset = datasets.Datasets(args.data_dir, args.input_n, args.output_n, args.skip_rate, split=0)
-    print('>>> Training dataset length: {:d}'.format(dataset.__len__()))
-    data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=0, pin_memory=True)
+    train_dataset = datasets.Datasets(args.data_dir, args.input_n, args.output_n, args.skip_rate, split=0)
+    print('>>> Training dataset length: {:d}'.format(train_dataset.__len__()))
+    train_sampler = DistributedSampler(train_dataset)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, sampler=train_sampler,
+                              num_workers=args.num_workers, pin_memory=True, drop_last=True)
 
-    vald_dataset = datasets.Datasets(args.data_dir, args.input_n, args.output_n, args.skip_rate, split=1)
-    print('>>> Validation dataset length: {:d}'.format(vald_dataset.__len__()))
-    vald_loader = DataLoader(vald_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0, pin_memory=True)
+    valid_dataset = datasets.Datasets(args.data_dir, args.input_n, args.output_n, args.skip_rate, split=1)
+    print('>>> Validation dataset length: {:d}'.format(valid_dataset.__len__()))
+    valid_sampler = DistributedSampler(valid_dataset)
+    valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, sampler=valid_sampler,
+                              num_workers=args.num_workers, pin_memory=True, drop_last=True)
 
     dim_used = np.array([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 25,
                          26, 27, 28, 29, 30, 31, 32, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
@@ -101,17 +118,15 @@ def train():
 
     for epoch in range(args.n_epochs):
         running_loss = 0
-        # if epoch % 2 == 0:
-        #     args.lr = lr_decay(optimizer, args.lr, args.lr_decay)
+        train_sampler.set_epoch(epoch)
         n = 0
         model.train()
-        print('lr: %.6f' % (optimizer.state_dict())['param_groups'][0]['lr'])
-        for cnt, batch in enumerate(tqdm(data_loader)):
-            batch = batch.to(device)
+        print('lr: %.8f' % (optimizer.state_dict())['param_groups'][0]['lr'])
+        for cnt, batch in enumerate(tqdm(train_loader)):
+            batch = batch.cuda(non_blocking=True)
             batch_dim = batch.shape[0]
             n += batch_dim
 
-            # 改变
             sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3, 3)
             sequences_gt = batch[:, args.input_n:args.input_n + args.output_n, dim_used].view(-1, args.output_n,
                                                                                               len(dim_used) // 3, 3)
@@ -123,76 +138,67 @@ def train():
                 sequences_predict = sequences_predict
 
                 loss1 = mpjpe_error(sequences_predict, sequences_gt)
-                # loss2 = mpjpe_error(sequences_rev, sequences_train.permute(0, 2, 3, 1))
-                # loss2 = bone_length_loss(sequences_train.permute(0, 2, 3, 1),
-                #                          sequences_predict, I_link, J_link)
-
-                # loss = loss1 + sm_loss_all + so_loss_all + tm_loss_all + to_loss_all
                 loss = loss1
-                # print('loss: %.3f, error: %.3f' % (loss1, e))
 
                 if cnt % 200 == 199:
-                # if cnt % 2 == 1:
                     print('[%d, %5d]  training loss: %.3f' % (epoch + 1, cnt + 1, loss1.item()))
-                    # print('loss: %.3f, l: %.3f, e: %.3f' % (loss1, l, e))
 
-                loss.backward()
-                optimizer.step()
-
-            if args.clip_grad is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad)
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                # for name, param in model.named_parameters():
+                #     if param.grad is None:
+                #         print(name)
+                if args.clip_grad is not None:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad)
+                scaler.step(optimizer)
+                if args.use_scheduler:
+                    scheduler.step()
+                scaler.update()
             running_loss += loss1 * batch_dim
-
         train_loss.append(running_loss.detach().cpu() / n)
 
         model.eval()
-        with torch.no_grad():
-            running_loss = 0
-            n = 0
-            for cnt, batch in enumerate(tqdm(vald_loader)):
-                batch = batch.to(device)
-                batch_dim = batch.shape[0]
-                n += batch_dim
+        if local_rank == 0:
+            with torch.no_grad():
+                running_loss = 0
+                n = 0
+                for cnt, batch in enumerate(tqdm(valid_loader)):
+                    batch = batch.cuda(non_blocking=True)
+                    batch_dim = batch.shape[0]
+                    n += batch_dim
 
-                sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3, 3)
-                sequences_gt = batch[:, args.input_n:args.input_n + args.output_n, dim_used].view(-1, args.output_n,
-                                                                                                  len(dim_used) // 3, 3)
+                    sequences_train = batch[:, 0:args.input_n, dim_used].view(-1, args.input_n, len(dim_used) // 3, 3)
+                    sequences_gt = batch[:, args.input_n:args.input_n + args.output_n, dim_used]\
+                        .view(-1, args.output_n, len(dim_used) // 3, 3)
 
-                # sequences_predict, sm_loss_all, so_loss_all, tm_loss_all, to_loss_all = model(sequences_train)
-                sequences_predict = model(sequences_train, spatial_adj, temporal_adj)
-                loss1 = mpjpe_error(sequences_predict, sequences_gt)
-                # loss2 = bone_length_loss(sequences_train.permute(0, 2, 3, 1),
-                #                          sequences_predict, I_link, J_link)
-                # loss = loss1 + args.loss_parameter * loss2 + e
+                    # sequences_predict, sm_loss_all, so_loss_all, tm_loss_all, to_loss_all = model(sequences_train)
+                    sequences_predict = model(sequences_train, spatial_adj, temporal_adj)
+                    loss1 = mpjpe_error(sequences_predict, sequences_gt)
+                    if cnt % 200 == 199:
+                        print('[%d, %5d]  validation loss: %.3f' % (epoch + 1, cnt + 1, loss1.item()))
+                    running_loss += loss1 * batch_dim
+                val_loss.append(running_loss.detach().cpu() / n)
+            torch.distributed.barrier()
 
-                if cnt % 200 == 199:
-                    print('[%d, %5d]  validation loss: %.3f' % (epoch + 1, cnt + 1, loss1.item()))
-                running_loss += loss1 * batch_dim
-            val_loss.append(running_loss.detach().cpu() / n)
-            # print(n)
         test_error = test()
         print('epoch %d  training loss: %.3f, validation loss: %.3f, testing loss: %.3f' %
               (epoch + 1, train_loss[-1], val_loss[-1], test_error))
 
-        # if (epoch + 1) % 50 == 0:
-        #     plt.figure(1)
-        #     plt.plot(train_loss, 'r', label='Train loss')
-        #     plt.plot(val_loss, 'g', label='Val loss')
-        #     plt.legend()
-        #     plt.show()
-        if args.use_scheduler:
-            scheduler.step()
-
+        if (epoch + 1) % 20 == 0:
+            plt.figure(1)
+            plt.plot(train_loss, 'r', label='Train loss')
+            plt.plot(val_loss, 'g', label='Val loss')
+            plt.legend()
+            plt.show()
         if test_error < best_acc:
             print('----saving model-----')
-            torch.save(model.state_dict(), os.path.join(args.model_path, model_name))
-            best_acc = test_error
+            if local_rank == 0:
+                torch.save(model.state_dict(), os.path.join(args.model_path, model_name))
+                best_acc = test_error
         print('best loss: %.3f' % best_acc)
 
 
 def test():
-    # print(args.model_path)
-    # print(model_name)
     # model.load_state_dict(torch.load(os.path.join(args.model_path, model_name)))
     model.eval()
     # print(model)
@@ -212,15 +218,15 @@ def test():
     for action in actions:
         running_loss = 0
         n = 0
-        dataset_test = datasets.Datasets(args.data_dir, args.input_n, args.output_n, args.skip_rate, split=2,
+        test_dataset = datasets.Datasets(args.data_dir, args.input_n, args.output_n, args.skip_rate, split=2,
                                          actions=[action])
-        print('>>> test action for sequences: {:d}'.format(dataset_test.__len__()))
-
-        test_loader = DataLoader(dataset_test, batch_size=args.batch_size_test, shuffle=False, num_workers=0,
-                                 pin_memory=True)
+        print('>>> test action for sequences: {:d}'.format(test_dataset.__len__()))
+        test_sampler = DistributedSampler(test_dataset)
+        test_loader = DataLoader(test_dataset, batch_size=args.batch_size_test, sampler=test_sampler,
+                                 num_workers=args.num_workers, pin_memory=True, drop_last=True)
         for cnt, batch in enumerate(test_loader):
             with torch.no_grad():
-                batch = batch.to(device)
+                batch = batch.cuda(non_blocking=True)
                 batch_dim = batch.shape[0]
                 n += batch_dim
 
@@ -236,14 +242,15 @@ def test():
                 all_joints_seq[:, :, dim_used] = sequences_predict
 
                 all_joints_seq[:, :, index_to_ignore] = all_joints_seq[:, :, index_to_equal]
-                loss = mpjpe_error(all_joints_seq.view(-1, args.output_n, 32, 3),
-                                   sequences_gt.view(-1, args.output_n, 32, 3))
-                # loss = mpjpe_error(all_joints_seq[:, :].view(-1, args.output_n, 22, 3),
-                #                    sequences_gt[:, :].view(-1, args.output_n, 22, 3))
-                # loss = mpjpe_error(all_joints_seq[:, -1].view(-1, 1, 32, 3),
-                #                    sequences_gt[:, -1].view(-1, 1, 32, 3))
+                # loss = mpjpe_error(all_joints_seq.view(-1, args.output_n, 32, 3),
+                #                    sequences_gt.view(-1, args.output_n, 32, 3))
+                # loss = mpjpe_error(all_joints_seq[:, :, dim_used].view(-1, args.output_n, 22, 3),
+                #                    sequences_gt[:, :, dim_used].view(-1, args.output_n, 22, 3))
+                loss = mpjpe_error(all_joints_seq[:, -1].view(-1, 1, 32, 3),
+                                   sequences_gt[:, -1].view(-1, 1, 32, 3))
                 running_loss += loss * batch_dim
                 accum_loss += loss * batch_dim
+                print(n)
 
         print('loss at test subject for action : ' + str(action) + ' is: ' + str(running_loss / n))
         n_batches += n
@@ -253,7 +260,6 @@ def test():
 
 
 if __name__ == '__main__':
-
     if args.mode == 'train':
         train()
     elif args.mode == 'test':
@@ -261,5 +267,5 @@ if __name__ == '__main__':
     elif args.mode == 'viz':
         model.load_state_dict(torch.load(os.path.join(args.model_path, model_name)))
         model.eval()
-        visualize(args.input_n, args.output_n, args.visualize_from, args.data_dir, model, device, args.n_viz,
+        visualize(args.input_n, args.output_n, args.visualize_from, args.data_dir, model, 'cuda:0', args.n_viz,
                   args.skip_rate, args.actions_to_consider)

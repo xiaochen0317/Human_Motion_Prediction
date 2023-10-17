@@ -1,6 +1,10 @@
 import argparse
+import os
 
 parser = argparse.ArgumentParser(description='Arguments for running the scripts')
+parser.add_argument("--num_workers", type=int, default=0)
+parser.add_argument("--restore_ckpt", type=str, default=None)
+parser.add_argument("--mixed_precision", type=bool, default=True)
 
 # ARGS FOR LOADING THE DATASET
 
@@ -17,13 +21,13 @@ parser.add_argument('--joints_to_consider', type=int, default=22, choices=[16, 1
 # ARGS FOR THE MODEL
 
 parser.add_argument('--n_encoder_layer', type=int, default=4, help='number of encoder layers')
-parser.add_argument('--n_decoder_layer', type=int, default=4, help='number of decoder layers')
-parser.add_argument('--dim', type=int, default=128, help='dimensions for the coordinates of the embedding')
+parser.add_argument('--n_decoder_layer', type=int, default=6, help='number of decoder layers')
+parser.add_argument('--dim', type=int,  default=64, help='dimensions for the coordinates of the embedding')
 parser.add_argument('--dcn_n', type=int, default=10, help='coefficient of dct')
 parser.add_argument('--input_dim', type=int, default=9, help='dimensions of the input coordinates')
 parser.add_argument('--output_dim', type=int, default=3, help='dimensions of the output coordinates')
-parser.add_argument('--dropout', type=float, default=0.0, help='mlp dropout')
-parser.add_argument('--attn_dropout', type=float, default=0.0, help='attn dropout')
+parser.add_argument('--dropout', type=float, default=0.3, help='mlp dropout')
+parser.add_argument('--attn_dropout', type=float, default=0.3, help='attn dropout')
 parser.add_argument('--tcn_dropout', type=float, default=0.0, help='tcn dropout')
 parser.add_argument('--drop_path', type=float, default=0.0, help='drop_path')
 parser.add_argument('--heads', type=int, default=8)
@@ -44,11 +48,11 @@ parser.add_argument('--mode', type=str, default='train', choices=['train', 'test
 parser.add_argument('--n_epochs', type=int, default=100, help='number of epochs to train')
 parser.add_argument('--batch_size', type=int, default=256, help='batch size')
 parser.add_argument('--batch_size_test', type=int, default=256, help='batch size for the test set')
-parser.add_argument('--lr', type=int, default=1.5e-02, help='Learning rate of the optimizer')
+parser.add_argument('--lr', type=int, default=1e-2, help='Learning rate of the optimizer')
 parser.add_argument('--use_scheduler', type=bool, default=True, help='use MultiStepLR scheduler')
-parser.add_argument('--milestones', type=list, default=[20, 25, 30, 40, 50],
+parser.add_argument('--milestones', type=list, default=[30, 40, 50],
                     help='the epochs after which the learning rate is adjusted by gamma')
-parser.add_argument('--gamma', type=float, default=0.3,
+parser.add_argument('--gamma', type=float, default=0.1,
                     help='gamma correction to the learning rate, after reaching the milestone epochs')
 parser.add_argument('--clip_grad', type=float, default=None, help='select max norm to clip gradients')
 parser.add_argument('--model_path', type=str, default='./checkpoints/CKPT_3D_H36M',
