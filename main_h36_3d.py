@@ -11,7 +11,7 @@ from utils.loss_funcs import *
 from utils.data_utils import define_actions
 from utils.h36_3d_viz import visualize
 from utils.parser import args
-from utils.DCT import reverse_dct_torch
+from utils.DCT import get_dct_matrix, reverse_dct_torch
 from tqdm import tqdm
 
 
@@ -122,8 +122,9 @@ def train():
                 sequences_predict = model(sequences_train, spatial_adj, temporal_adj)  # B, T, J, C
                 sequences_predict = (sequences_predict + 1) / 2
                 sequences_predict = sequences_predict * (global_max - global_min) + global_min
+                dct_m, idct_m = get_dct_matrix(args.output_n)
                 if args.is_DCT:
-                    sequences_predict = reverse_dct_torch(sequences_predict, self.i_dct_m, self.cfg.seq_len)
+                    sequences_predict = reverse_dct_torch(sequences_predict, idct_m, args.output_n)
                 loss = mpjpe_error(sequences_predict, sequences_gt)
 
                 if cnt % 2 == 1:
@@ -154,7 +155,7 @@ def train():
                 loss = mpjpe_error(sequences_predict, sequences_gt)
 
                 if cnt % 200 == 199:
-                    print('[%d, %5d]  validation loss: %.3f' % (epoch + 1, cnt + 1, loss1.item()))
+                    print('[%d, %5d]  validation loss: %.3f' % (epoch + 1, cnt + 1, loss.item()))
                 running_loss += loss * batch_dim
             val_loss.append(running_loss.detach().cpu() / n)
         test_error = test(global_max, global_min)
@@ -163,8 +164,8 @@ def train():
 
         if (epoch + 1) % 10 == 0:
             plt.figure(1)
-            plt.plot(train_loss, 'r', label='Train loss')
-            plt.plot(val_loss, 'g', label='Val loss')
+            plt.plot(train_loss, 'r', label='Training loss')
+            plt.plot(val_loss, 'g', label='Validation loss')
             plt.legend()
             plt.show()
         if args.use_scheduler:

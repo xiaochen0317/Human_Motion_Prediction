@@ -1,22 +1,24 @@
 from torch.utils.data import Dataset
 import numpy as np
-import data_utils
-from DCT import get_dct_matrix, dct_transform_torch
-from parser import args
+from utils.DCT import get_dct_matrix, dct_transform_torch
+from utils.parser import args
+import utils.data_utils as data_utils
 
 
 class MotionDataset(Dataset):
     def __init__(self, data_dir, actions, mode_name='train', input_n=10, output_n=25, split=0,
-                 sample_rate=2, test_manner='8', global_max=0, global_min=0, device='cuda:0'):
+                 sample_rate=2, test_manner='256', global_max=0, global_min=0, device='cuda:0'):
         self.data_dir = data_dir
         self.split = split
 
         subs = [[1, 6, 7, 8, 9], [5], [11]]
+        subs = [[1], [5], [11]]
         acts = data_utils.define_actions(actions)
 
         subjs = subs[split]
         all_seqs, dim_ignore, dim_used = data_utils.load_data_3d(data_dir, subjs, acts, sample_rate, input_n + output_n,
                                                                  device=device, test_manner=test_manner)
+
         gt_32 = all_seqs.transpose(0, 2, 1)  # B, T, 3*J -> B, 3*J, T
         gt_22 = gt_32[:, dim_used, :]
 

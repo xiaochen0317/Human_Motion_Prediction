@@ -15,9 +15,9 @@ parser.add_argument('--skip_rate', type=int, default=1, choices=[1, 5],
                     help='rate of frames to skip,defaults=1 for H36M or 5 for AMASS/3DPW')
 parser.add_argument('--joints_to_consider', type=int, default=22, choices=[16, 18, 22],
                     help='number of joints to use, defaults=16 for H36M angles, 22 for H36M 3D or 18 for AMASS/3DPW')
-parser.add_argument('--is_normalized', type=bool, default=True)
-parser.add_argument('is_dct', type=bool, default=False)
-parser.add_argument('is_repeated', type=bool, default=False)
+parser.add_argument('--is_normalized', type=bool, default=False)
+parser.add_argument('--is_dct', type=bool, default=False)
+parser.add_argument('--is_repeated', type=bool, default=False)
 # todo: 因为我们需要考虑节点之间的时空关联特性，如果进行DCT，那么节点之间的时空关系可能就发生变化了？（但是实际上，在除了第一层的模块，
 #  其他的模型都不是最初始的特征。）
 

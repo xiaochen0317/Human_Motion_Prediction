@@ -27,3 +27,7 @@ def euler_error(ang_pred, ang_gt):  # MAE
     mean_errors = torch.mean(torch.norm(pred_eul - targ_eul, 2, 1))
 
     return mean_errors
+
+
+#todo: 补充其他两种损失函数
+# def
